@@ -1,0 +1,28 @@
+# CDN redirect: {{ domain }} -> {{ redirect_url }}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ domain }};
+
+{% if force_https %}
+    if ($scheme = http) {
+        return 301 https://$host$request_uri;
+    }
+{% endif %}
+
+{% if ssl_enabled and ssl_cert and ssl_key %}
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    ssl_certificate {{ ssl_cert }};
+    ssl_certificate_key {{ ssl_key }};
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:CDN_SSL:10m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+{% endif %}
+
+    return 301 {{ redirect_url }}$request_uri;
+}

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDN Manager</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}.nav-tabs .nav-link{border:none;color:#666;padding:10px 20px;border-radius:8px 8px 0 0}.nav-tabs .nav-link.active{color:#4361ee;border-bottom:3px solid #4361ee;font-weight:600;background:transparent}.stat-card{display:flex;align-items:center;gap:14px}.stat-icon{font-size:36px}.stat-value{font-size:26px;font-weight:700}.stat-label{font-size:13px;color:#888}.table>thead{background:#f8f9fa}.btn-sm{padding:4px 10px;font-size:12px}.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}.tag-success{background:#d4edda;color:#155724}.tag-danger{background:#f8d7da;color:#721c24}.tag-warning{background:#fff3cd;color:#856404}.tag-info{background:#d1ecf1;color:#0c5460}.tag-secondary{background:#e2e3e5;color:#383d41}.modal{display:none}.modal.show{display:block;background:rgba(0,0,0,.4)}.search-box{max-width:300px}.toast-wrap{position:fixed;top:60px;right:16px;z-index:2000}.cell-max{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark px-3">
+  <span class="navbar-brand">CDN Manager</span>
+  <span class="text-light small" id="managerStatus"></span>
+</nav>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="container-fluid p-4">
+  <ul class="nav nav-tabs mb-3" id="tabs">
+    <li class="nav-item"><a class="nav-link active" href="#" data-tab="dash">仪表盘</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" data-tab="sites">站点管理</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" data-tab="nodes">节点管理</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" data-tab="certs">证书库</a></li>
+  </ul>
+
+  <!-- Dashboard -->
+  <div id="tab-dash">
+    <div class="row g-3 mb-3" id="statCards"></div>
+    <div class="card"><div class="card-header fw-bold">节点活动</div>
+      <div class="card-body"><div class="table-responsive"><table class="table table-sm mb-0" id="nodeActivity"></table></div></div>
+    </div>
+  </div>
+
+  <!-- Sites -->
+  <div id="tab-sites" style="display:none">
+    <div class="card"><div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">站点管理</span>
+      <button class="btn btn-primary btn-sm" onclick="openSiteForm()">+ 添加站点</button>
+    </div>
+    <div class="card-body">
+      <input class="form-control search-box mb-2" id="siteSearch" placeholder="搜索域名..." oninput="renderSites()">
+      <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>
+        <th>ID</th><th>域名</th><th>类型</th><th>源站 / 重定向目标</th><th>TTL</th>
+        <th>HTTPS</th><th>SSL</th><th>缓存</th><th>证书</th><th>状态</th><th>操作</th>
+      </tr></thead><tbody id="siteTable"></tbody></table></div>
+    </div></div>
+  </div>
+
+  <!-- Nodes -->
+  <div id="tab-nodes" style="display:none">
+    <div class="card"><div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">节点管理</span>
+      <button class="btn btn-primary btn-sm" onclick="openNodeAdd()">+ 添加节点</button>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>
+        <th>名称</th><th>IP</th><th>类型</th><th>状态</th><th>验证</th><th>站点数</th><th>最后在线</th><th>操作</th>
+      </tr></thead><tbody id="nodeTable"></tbody></table></div>
+    </div></div>
+  </div>
+
+  <!-- Certs (library) -->
+  <div id="tab-certs" style="display:none">
+    <div class="card"><div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">证书库</span>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="openCertIssue()">+ 签发</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="openCertImport()">导入</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">证书集中保存在此库中，站点 → 编辑 → “使用证书”下拉选择绑定；通配符证书可复用给多个子域名站点。未绑定同名/通配证书的站点也会自动匹配。</p>
+      <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>
+        <th>名称</th><th>覆盖域名</th><th>签发时间</th><th>到期时间</th><th>状态</th><th>绑定站点</th><th>操作</th>
+      </tr></thead><tbody id="certTable"></tbody></table></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- MODALS -->
+
+<!-- Site Form -->
+<div class="modal" id="modalSite"><div class="modal-dialog"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title" id="siteModalTitle">添加站点</h5><button class="btn-close" onclick="closeModal('modalSite')"></button></div>
+<div class="modal-body">
+  <input type="hidden" id="editSiteId">
+  <div class="mb-2"><label class="form-label small text-danger">* 域名</label><input class="form-control" id="siteDomain" placeholder="www.example.com 或 *.example.com"></div>
+  <div class="mb-2"><label class="form-label small">源站 URL（反代站点填）</label><input class="form-control" id="siteOrigin" placeholder="https://origin.example.com"></div>
+  <div class="mb-2"><label class="form-label small">301 重定向目标（重定向站点填，原路径自动保留）</label><input class="form-control" id="siteRedirect" placeholder="https://new.example.com"></div>
+  <div class="mb-2"><label class="form-label small">缓存 TTL (秒)</label><input class="form-control" type="number" id="siteTtl" value="3600" min="0"></div>
+  <div class="mb-2"><label class="form-label small">使用证书（来自证书库）</label>
+    <select class="form-select" id="siteCert"><option value="">自动匹配 / 不绑定</option></select>
+  </div>
+  <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="siteHttps"><label class="form-check-label small">HTTP 自动跳转 HTTPS</label></div>
+  <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="siteCache" checked><label class="form-check-label small">启用 CDN 缓存（业务系统 / 需登录站点建议关闭）</label></div>
+  <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="siteSsl" checked><label class="form-check-label small">启用 SSL</label></div>
+</div>
+<div class="modal-footer"><button class="btn btn-secondary btn-sm" onclick="closeModal('modalSite')">取消</button><button class="btn btn-primary btn-sm" onclick="saveSite()">保存</button></div>
+</div></div></div>
+
+<!-- Node Form -->
+<div class="modal" id="modalNode"><div class="modal-dialog"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title" id="nodeModalTitle">添加节点</h5><button class="btn-close" onclick="closeModal('modalNode')"></button></div>
+<div class="modal-body">
+  <input type="hidden" id="editNodeId">
+  <div class="mb-2"><label class="form-label small text-danger">* 名称</label><input class="form-control" id="nodeName"></div>
+  <div class="mb-2"><label class="form-label small">IP</label><input class="form-control" id="nodeIp"></div>
+  <div class="mb-2"><label class="form-label small">类型</label><select class="form-select" id="nodeType" onchange="document.getElementById('baotaFields').style.display=this.value=='baota'?'':'none'"><option value="auto">auto</option><option value="baota">baota</option></select></div>
+  <div id="baotaFields" style="display:none">
+    <div class="mb-2"><label class="form-label small">Baota 面板 URL</label><input class="form-control" id="nodeBaotaUrl" placeholder="http://IP:8888/安全入口"></div>
+    <div class="mb-2"><label class="form-label small">Baota API Key</label><input class="form-control" id="nodeBaotaKey" placeholder="编辑时留空则不修改"></div>
+  </div>
+</div>
+<div class="modal-footer"><button class="btn btn-secondary btn-sm" onclick="closeModal('modalNode')">取消</button><button class="btn btn-primary btn-sm" onclick="saveNode()">保存</button></div>
+</div></div></div>
+
+<!-- Token Dialog -->
+<div class="modal" id="modalToken"><div class="modal-dialog modal-lg"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">节点安装命令</h5><button class="btn-close" onclick="closeModal('modalToken')"></button></div>
+<div class="modal-body"><div class="alert alert-warning small">Token 一次性，用于节点注册。</div>
+  <div class="mb-2"><strong id="tokenNodeName"></strong></div>
+  <div class="mb-2"><textarea class="form-control" rows="2" id="tokenCmd" readonly></textarea></div>
+  <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('tokenCmd').value);toast('已复制','success')"><i class="bi bi-clipboard"></i> 复制</button>
+</div></div></div></div>
+
+<!-- Cert Issue -->
+<div class="modal" id="modalCertIssue"><div class="modal-dialog"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">签发证书到证书库</h5><button class="btn-close" onclick="closeModal('modalCertIssue')"></button></div>
+<div class="modal-body">
+  <div class="mb-2"><label class="form-label small text-danger">* 域名</label><input class="form-control" id="issueDomain" placeholder="example.com 或 *.example.com"></div>
+  <div class="form-check"><input class="form-check-input" type="radio" name="issueMode" id="issueAcme" checked><label class="form-check-label small">acme.sh / Let's Encrypt</label></div>
+  <div class="form-check"><input class="form-check-input" type="radio" name="issueMode" id="issueSelf"><label class="form-check-label small">自签名（测试用）</label></div>
+</div>
+<div class="modal-footer"><button class="btn btn-secondary btn-sm" onclick="closeModal('modalCertIssue')">取消</button><button class="btn btn-primary btn-sm" onclick="doCertIssue()">签发并入库</button></div>
+</div></div></div>
+
+<!-- Cert Import -->
+<div class="modal" id="modalCertImport"><div class="modal-dialog modal-lg"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">导入证书到证书库</h5><button class="btn-close" onclick="closeModal('modalCertImport')"></button></div>
+<div class="modal-body">
+  <div class="mb-2"><label class="form-label small text-danger">* 名称</label><input class="form-control" id="certName" placeholder="如 *.example.com"></div>
+  <div class="mb-2"><label class="form-label small">方式</label>
+    <select class="form-select" id="certMode" onchange="toggleCertMode()">
+      <option value="dir">目录自动发现</option><option value="file">手动指定文件</option><option value="paste">粘贴内容</option>
+    </select>
+  </div>
+  <div id="certDirGroup" class="mb-2"><label class="form-label small">证书目录</label><input class="form-control" id="certDir" placeholder="/root/.acme.sh/domain"></div>
+  <div id="certFileGroup" style="display:none"><div class="mb-2"><label class="form-label small">证书文件路径</label><input class="form-control" id="certFile"></div>
+  <div class="mb-2"><label class="form-label small">密钥文件路径</label><input class="form-control" id="certKey"></div></div>
+  <div id="certPasteGroup" style="display:none"><div class="mb-2"><label class="form-label small">证书 PEM 内容</label><textarea class="form-control" id="certPem" rows="5"></textarea></div>
+  <div class="mb-2"><label class="form-label small">私钥 PEM 内容</label><textarea class="form-control" id="certKeyPem" rows="5"></textarea></div></div>
+</div>
+<div class="modal-footer"><button class="btn btn-secondary btn-sm" onclick="closeModal('modalCertImport')">取消</button><button class="btn btn-primary btn-sm" onclick="doCertImport()">导入</button></div>
+</div></div></div>
+
+<script>
+const API='/api/v1';
+let allSites=[], allNodes=[], allCerts=[], managerOk=false;
+
+// ── Toast / feedback ────────────────────
+function toast(msg, type){type=type||'info';const colors={success:'#155724',danger:'#721c24',info:'#0c5460',warning:'#856404'};const bg={success:'#d4edda',danger:'#f8d7da',info:'#d1ecf1',warning:'#fff3cd'};const w=document.getElementById('toastWrap');const el=document.createElement('div');el.className='toast show align-items-center mb-2';el.style.background=bg[type]||bg.info;el.innerHTML=`<div class="d-flex"><div class="toast-body" style="color:${colors[type]}">${msg}</div><button type="button" class="btn-close me-2 m-auto" onclick="this.parentElement.parentElement.remove()"></button></div>`;w.appendChild(el);setTimeout(()=>el.remove(),4000)}
+async function api(url,opt){opt=opt||{};if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);if(opt.body)opt.headers=Object.assign({'Content-Type':'application/json'},opt.headers||{});const r=await fetch(API+url,opt);const ct=r.headers.get('content-type')||'';const d=ct.includes('json')?await r.json():await r.text();if(!r.ok)throw new Error((d&&d.error)||(typeof d==='string'?d:'请求失败 '+r.status));return d}
+
+// ── Tabs ────────────────────────────────
+document.querySelectorAll('#tabs .nav-link').forEach(el=>el.addEventListener('click',function(e){e.preventDefault();document.querySelectorAll('#tabs .nav-link').forEach(t=>t.classList.remove('active'));this.classList.add('active');document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.getElementById('tab-'+this.dataset.tab).style.display='';if(this.dataset.tab!=='dash')refreshData(this.dataset.tab)}));
+
+async function init(){await refreshAll();refreshStats();setInterval(refreshAll,30000);setInterval(refreshStats,30000)}
+async function refreshAll(){try{const h=await fetch('/health');const d=await h.json();managerOk=d.status==='ok';document.getElementById('managerStatus').innerText=`Manager ${managerOk?'正常运行':'异常'} · ${d.sites||0} 站点 · ${d.nodes||0} 节点 · ${d.certs??'-'} 证书`}catch(e){managerOk=false;document.getElementById('managerStatus').innerText='Manager 离线'}refreshDash()}
+
+// ── Dashboard ───────────────────────────
+async function refreshDash(){try{const n=(await api('/nodes')).nodes||[];allNodes=n;renderStats(n);renderNodeActivity(n)}catch(e){}}
+async function refreshStats(){try{allCerts=(await api('/certificates')).certificates||[]}catch(e){}try{allSites=(await api('/sites')).sites||[];renderStats(allNodes)}catch(e){}}
+function renderStats(nodes){const online=nodes.filter(n=>n.status==='online').length;const sites=new Set();nodes.forEach(n=>(n.sites||[]).forEach(s=>sites.add(s)));
+  document.getElementById('statCards').innerHTML=`
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="stat-card"><i class="bi bi-globe stat-icon text-primary"></i><div><div class="stat-value">${sites.size}</div><div class="stat-label">站点总数</div></div></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="stat-card"><i class="bi bi-hdd-rack stat-icon text-success"></i><div><div class="stat-value">${nodes.length}</div><div class="stat-label">节点总数</div></div></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="stat-card"><i class="bi bi-shield-lock stat-icon text-warning"></i><div><div class="stat-value">${allCerts.length}</div><div class="stat-label">证书库</div></div></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="stat-card"><i class="bi bi-check-circle stat-icon ${managerOk?'text-success':'text-danger'}"></i><div><div class="stat-value">${online}/${nodes.length}</div><div class="stat-label">在线节点</div></div></div></div></div></div>`}
+function renderNodeActivity(nodes){document.getElementById('nodeActivity').innerHTML='<thead><tr><th>名称</th><th>IP</th><th>类型</th><th>状态</th><th>验证</th><th>站点数</th><th>最后在线</th></tr></thead><tbody>'+nodes.map(n=>{const v=n.sync_verified?'🟢 已验证':(n.status==='online'?'🟡 待验证':'');return`<tr><td>${n.name}</td><td>${n.ip}</td><td>${n.node_type}</td><td><span class="tag ${n.status==='online'?'tag-success':'tag-danger'}">${n.status}</span></td><td>${v||'-'}</td><td>${n.site_count||0}</td><td>${n.last_seen||'-'}</td></tr>`}).join('')+'</tbody>'}
+
+// ── Sites ───────────────────────────────
+async function refreshSites(){allSites=(await api('/sites')).sites||[];renderSites()}
+function certNameById(id){if(!id)return '';const c=allCerts.find(x=>x.id===Number(id));return c?c.name:''}
+function renderSites(){const q=(document.getElementById('siteSearch')?.value||'').toLowerCase();const sites=q?allSites.filter(s=>s.domain.toLowerCase().includes(q)):allSites;
+  document.getElementById('siteTable').innerHTML=sites.map(s=>{const type=s.redirect_url?'301跳转':'反代';const target=s.redirect_url||s.origin_url||'-';const cn=certNameById(s.certificate_id);
+  return `<tr><td>${s.id}</td><td class="cell-max" title="${s.domain}">${s.domain}</td><td><span class="tag ${s.redirect_url?'tag-warning':'tag-info'}">${type}</span></td><td class="cell-max" title="${target}">${target}</td><td>${s.cache_ttl}s</td><td><span class="tag ${s.force_https?'tag-success':'tag-secondary'}">${s.force_https?'ON':'OFF'}</span></td><td><span class="tag ${s.ssl_enabled?'tag-success':'tag-secondary'}">${s.ssl_enabled?'ON':'OFF'}</span></td><td><span class="tag ${s.cache_enabled?'tag-success':'tag-secondary'}">${s.cache_enabled?'ON':'OFF'}</span></td><td>${cn||'-'}</td><td><span class="tag ${s.active?'tag-success':'tag-danger'}">${s.active?'启用':'停用'}</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="editSite(${s.id})">编辑</button> <button class="btn btn-sm btn-outline-danger" onclick="delSite(${s.id})">删除</button></td></tr>`}).join('')||'<tr><td colspan="11" class="text-center text-muted">暂无站点，点击右上角添加</td></tr>'}
+function fillCertSelect(){const sel=document.getElementById('siteCert');const cur=sel.value;sel.innerHTML='<option value="">自动匹配 / 不绑定</option>'+allCerts.map(c=>`<option value="${c.id}">#${c.id} ${c.name}${c.needs_renewal?' (需续期)':''}</option>`).join('');sel.value=cur}
+function openSiteForm(){['editSiteId','siteDomain','siteOrigin','siteRedirect'].forEach(i=>document.getElementById(i).value='');document.getElementById('siteTtl').value='3600';document.getElementById('siteCache').checked=true;document.getElementById('siteSsl').checked=true;document.getElementById('siteHttps').checked=false;fillCertSelect();document.getElementById('siteCert').value='';document.getElementById('siteModalTitle').innerText='添加站点';showModal('modalSite')}
+function editSite(id){const s=allSites.find(x=>x.id===id);if(!s)return;fillCertSelect();document.getElementById('editSiteId').value=s.id;document.getElementById('siteDomain').value=s.domain;document.getElementById('siteOrigin').value=s.origin_url||'';document.getElementById('siteRedirect').value=s.redirect_url||'';document.getElementById('siteTtl').value=s.cache_ttl;document.getElementById('siteCache').checked=s.cache_enabled;document.getElementById('siteSsl').checked=s.ssl_enabled;document.getElementById('siteHttps').checked=s.force_https;document.getElementById('siteCert').value=s.certificate_id?s.certificate_id:'';document.getElementById('siteModalTitle').innerText='编辑站点 #'+s.id;showModal('modalSite')}
+async function saveSite(){const id=document.getElementById('editSiteId').value;const domain=document.getElementById('siteDomain').value.trim();const origin=document.getElementById('siteOrigin').value.trim();const redirect=document.getElementById('siteRedirect').value.trim();const certV=document.getElementById('siteCert').value;
+  if(!domain){toast('请填写域名','danger');return}
+  if(!origin&&!redirect){toast('源站 URL 和 301 重定向目标至少填一个','danger');return}
+  const data={domain,origin_url:origin,redirect_url:redirect,cache_ttl:parseInt(document.getElementById('siteTtl').value)||3600,cache_enabled:document.getElementById('siteCache').checked,ssl_enabled:document.getElementById('siteSsl').checked,force_https:document.getElementById('siteHttps').checked,certificate_id:certV?Number(certV):null};
+  try{if(id){await api('/sites/'+id,{method:'PUT',body:data});toast('站点已保存，节点将自动同步','success')}else{await api('/sites',{method:'POST',body:data});toast('站点已添加','success')}closeModal('modalSite');refreshSites();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function delSite(id){if(!confirm('删除站点 #'+id+'？'))return;try{await api('/sites/'+id,{method:'DELETE'});toast('已删除','success');refreshSites();refreshDash()}catch(e){toast(e.message,'danger')}}
+
+// ── Nodes ───────────────────────────────
+async function refreshNodes(){allNodes=(await api('/nodes')).nodes||[];renderNodes()}
+function renderNodes(){document.getElementById('nodeTable').innerHTML=allNodes.map(n=>{const v=n.sync_verified?'🟢 已验证':(n.status==='online'?'🟡 待验证':'');return`<tr><td>${n.name}</td><td>${n.ip}</td><td>${n.node_type}</td><td><span class="tag ${n.status==='online'?'tag-success':'tag-danger'}">${n.status}</span></td><td>${v||'-'}</td><td>${n.site_count||0}</td><td>${n.last_seen||'-'}</td><td><button class="btn btn-sm btn-outline-secondary" onclick="editNode(${n.id})">编辑</button> <button class="btn btn-sm btn-outline-primary" onclick="openToken('${n.name}','${n.node_type}','${n.ip}')">Token</button> <button class="btn btn-sm btn-outline-danger" onclick="delNode(${n.id})">删除</button></td></tr>`}).join('')||'<tr><td colspan="8" class="text-center text-muted">暂无节点</td></tr>'}
+function openNodeAdd(){document.getElementById('editNodeId').value='';document.getElementById('nodeName').value='';document.getElementById('nodeIp').value='';document.getElementById('nodeType').value='auto';document.getElementById('nodeBaotaUrl').value='';document.getElementById('nodeBaotaKey').value='';document.getElementById('baotaFields').style.display='none';document.getElementById('nodeModalTitle').innerText='添加节点';showModal('modalNode')}
+function editNode(id){const n=allNodes.find(x=>x.id===id);if(!n)return;document.getElementById('editNodeId').value=n.id;document.getElementById('nodeName').value=n.name;document.getElementById('nodeIp').value=n.ip;document.getElementById('nodeType').value=n.node_type;document.getElementById('nodeBaotaUrl').value=n.baota_url||'';document.getElementById('nodeBaotaKey').value='';document.getElementById('baotaFields').style.display=n.node_type==='baota'?'':'none';document.getElementById('nodeModalTitle').innerText='编辑节点 #'+id;showModal('modalNode')}
+async function saveNode(){const id=document.getElementById('editNodeId').value;const name=document.getElementById('nodeName').value.trim();if(!name){toast('请填写节点名称','danger');return}const data={name,ip:document.getElementById('nodeIp').value.trim(),node_type:document.getElementById('nodeType').value};if(data.node_type==='baota'){data.baota_url=document.getElementById('nodeBaotaUrl').value.trim();const k=document.getElementById('nodeBaotaKey').value.trim();if(k)data.baota_key=k}
+  try{if(id){await api('/nodes/'+id,{method:'PUT',body:data});toast('节点已更新','success')}else{await api('/nodes',{method:'POST',body:data});toast('节点已添加','success')}closeModal('modalNode');refreshNodes();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function delNode(id){if(!confirm('删除节点 #'+id+'？'))return;try{await api('/nodes/'+id,{method:'DELETE'});toast('已删除','success');refreshNodes();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function openToken(name,type,ip){try{const t=await api('/tokens',{method:'POST',body:{node_name:name,node_type:type}});const url=`http://${location.hostname}:${location.port||'8080'}`;document.getElementById('tokenNodeName').innerText=`节点: ${name}`;document.getElementById('tokenCmd').value=`curl -fsSL "${url}/install.sh?token=${t.token}&manager=${url}" | bash`;showModal('modalToken')}catch(e){toast(e.message,'danger')}}
+
+// ── Certificates (library) ──────────────
+async function refreshCerts(){allCerts=(await api('/certificates')).certificates||[];renderCerts()}
+function renderCerts(){document.getElementById('certTable').innerHTML=allCerts.map(c=>`<tr><td>#${c.id} ${c.name}</td><td class="cell-max" title="${c.domains}">${c.domains||'-'}</td><td>${c.issued_at||'-'}</td><td>${c.expires_at||'-'}</td><td><span class="tag ${c.needs_renewal?'tag-danger':'tag-success'}">${c.needs_renewal?'需续期':'正常'}</span></td><td class="cell-max" title="${(c.bound_sites||[]).join(', ')}">${(c.bound_sites||[]).join(', ')||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="renewCert(${c.id})">续期</button> <button class="btn btn-sm btn-outline-danger" onclick="delCert(${c.id})">删除</button></td></tr>`).join('')||'<tr><td colspan="7" class="text-center text-muted">证书库为空</td></tr>'}
+function openCertIssue(){document.getElementById('issueDomain').value='';showModal('modalCertIssue')}
+async function doCertIssue(){const domain=document.getElementById('issueDomain').value.trim();if(!domain){toast('请填写域名','danger');return}const use_acme=document.getElementById('issueAcme').checked;try{await api('/certificates/issue',{method:'POST',body:{domain,use_acme}});toast('证书已签发并入证书库','success');closeModal('modalCertIssue');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+function openCertImport(){document.getElementById('certName').value='';showModal('modalCertImport')}
+function toggleCertMode(){const v=document.getElementById('certMode').value;document.getElementById('certDirGroup').style.display=v==='dir'?'':'none';document.getElementById('certFileGroup').style.display=v==='file'?'':'none';document.getElementById('certPasteGroup').style.display=v==='paste'?'':'none'}
+async function doCertImport(){const name=document.getElementById('certName').value.trim();if(!name){toast('请填写名称','danger');return}const data={name};const m=document.getElementById('certMode').value;if(m==='dir'){data.domain=name;data.cert_dir=document.getElementById('certDir').value.trim()}else if(m==='file'){data.domain=name;data.cert_path=document.getElementById('certFile').value.trim();data.key_path=document.getElementById('certKey').value.trim()}else{data.domain=name;data.cert_pem=document.getElementById('certPem').value;data.key_pem=document.getElementById('certKeyPem').value}
+  try{await api('/certificates/import',{method:'POST',body:data});toast('证书已导入证书库','success');closeModal('modalCertImport');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function renewCert(id){try{await api('/certificates/'+id+'/renew',{method:'POST'});toast('已续期','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function delCert(id){const c=allCerts.find(x=>x.id===id);if(!confirm(`删除证书 #${id}（${c?c.name:''}）？将解除其绑定的站点。`))return;try{await api('/certificates/'+id,{method:'DELETE'});toast('已删除','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+
+// ── Modal helpers ───────────────────────
+function showModal(id){document.getElementById(id).classList.add('show');document.getElementById(id).style.display='block'}
+function closeModal(id){document.getElementById(id).classList.remove('show');document.getElementById(id).style.display='none'}
+function refreshData(tab){if(tab==='sites')refreshSites();if(tab==='nodes')refreshNodes();if(tab==='certs')refreshCerts()}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""dyh-cdn — CDN 交互式管理引导程序"""
+
+import sys, os
+
+REAL_DIR = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, REAL_DIR)
+
+from manager.database import Database
+from manager.ssl_manager import SSLManager
+from manager.models import Site
+from manager.config import MANAGER_PORT
+from manager.cli import _detect_manager_ip
+
+db = Database()
+ssl_mgr = SSLManager()
+
+
+def ask(prompt, default=""):
+    d = f" [{default}]" if default else ""
+    v = input(f"  {prompt}{d}: ").strip()
+    return v or default
+
+
+def confirm(msg):
+    return input(f"  {msg} [Y/n]: ").strip().lower() != "n"
+
+
+def section(title):
+    print(f"\n{'─'*50}")
+    print(f"  {title}")
+    print(f"{'─'*50}")
+
+
+# ── Site ──────────────────────────────────────
+def wizard_add_site():
+    print("\n  === 添加站点 ===")
+    domain = ask("域名（如 www.example.com 或 *.example.com）")
+    if not domain:
+        print("  取消。"); return
+    redirect = ask("301 重定向目标（填则站点直接 301 跳转，如 https://new.example.com，留空为反代站点）")
+    origin = ""
+    if not redirect:
+        origin = ask("源站 URL（如 https://origin.example.com）")
+        if not origin:
+            print("  取消。"); return
+    ttl = ask("缓存 TTL 秒", "3600")
+    ssl = confirm("启用 SSL？")
+    https = False
+    if ssl:
+        https = confirm("HTTP 自动跳转 HTTPS？")
+    cache = True
+    if redirect:
+        cache = False
+    else:
+        cache = confirm("启用 CDN 缓存？（需登录的业务系统建议 N 关闭）")
+
+    site = Site(domain=domain.lower(), origin_url=origin, redirect_url=redirect,
+                cache_ttl=int(ttl), ssl_enabled=ssl, cache_enabled=cache, force_https=https)
+    site = db.create_site(site)
+    db.bump_all_node_hashes()
+    kind = "redirect" if redirect else "proxy"
+    print(f"  ✓ 站点已创建: id={site.id} domain={site.domain} type={kind}（自动分配到全部节点）")
+
+
+def wizard_list_sites():
+    sites = db.list_sites()
+    if not sites:
+        print("  暂无站点。"); return
+    print(f"\n  {'ID':<4} {'域名':<30} {'目标/源站':<35} {'TTL':<8} SSL  缓存  状态")
+    print(f"  {'-'*4} {'-'*30} {'-'*35} {'-'*8} ----  ----  ----")
+    for s in sites:
+        ssl = "✓" if s.ssl_enabled else "✗"
+        cache = "✓" if s.cache_enabled else "✗"
+        active = "启用" if s.active else "停用"
+        target = s.redirect_url or s.origin_url
+        print(f"  {s.id:<4} {s.domain:<30} {target:<35} {s.cache_ttl:<8} {ssl}   {cache}   {active}")
+
+
+def wizard_update_site():
+    wizard_list_sites()
+    sid = ask("输入要修改的站点域名或 ID")
+    if not sid:
+        print("  取消。"); return
+
+    site = db.get_site_by_domain(sid) if not sid.isdigit() else db.get_site(int(sid))
+    if not site:
+        print(f"  站点不存在: {sid}"); return
+
+    print(f"  当前: domain={site.domain} origin={site.origin_url} redirect={site.redirect_url or '-'} "
+          f"ttl={site.cache_ttl}s ssl={'ON' if site.ssl_enabled else 'OFF'} "
+          f"active={'ON' if site.active else 'OFF'} cache={'ON' if site.cache_enabled else 'OFF'}")
+    print("  （留空表示不修改）")
+    origin = ask("新源站 URL", site.origin_url)
+    redirect = ask("301 重定向目标（留空保持，'-' 清除）", site.redirect_url or "")
+    if redirect == "-":
+        site.redirect_url = ""
+        redirect = ""
+    elif redirect and redirect != site.redirect_url:
+        site.redirect_url = redirect
+        site.cache_enabled = False
+    ttl = ask("新缓存 TTL", str(site.cache_ttl))
+    https = ask("HTTP->HTTPS ON/OFF", "ON" if site.force_https else "OFF").lower()
+    if https == "on":
+        site.force_https = True
+    elif https == "off":
+        site.force_https = False
+    cache = ask("CDN 缓存 ON/OFF", "ON" if site.cache_enabled else "OFF").lower()
+    if cache == "on":
+        site.cache_enabled = True
+    elif cache == "off":
+        site.cache_enabled = False
+
+    site.origin_url = origin
+    site.origin_host = ""
+    site.cache_ttl = int(ttl)
+    db.update_site(site)
+    db.bump_all_node_hashes()
+    print(f"  ✓ 站点已更新")
+
+
+# ── Node ──────────────────────────────────────
+def wizard_add_node():
+    print("\n  === 添加节点 ===")
+    name = ask("节点名称")
+    if not name: print("  取消。"); return
+    ip = ask("节点 IP（可选）")
+    ntype = ask("类型 auto/baota", "auto")
+    if ntype not in ("auto", "baota"):
+        print("  无效类型"); return
+
+    import secrets
+    from manager.models import Node
+    burl = bkey = ""
+    if ntype == "baota":
+        burl = ask("Baota 面板 URL", "http://" + (ip or "127.0.0.1") + ":8888")
+        bkey = ask("Baota API Key")
+    node = Node(name=name, ip=ip, node_type=ntype, api_key=secrets.token_urlsafe(32),
+                status="pending", baota_url=burl, baota_key=bkey)
+    node = db.create_node(node)
+    db.bump_all_node_hashes()
+    print(f"  ✓ 节点已创建: id={node.id} name={node.name}")
+    print(f"  API Key: {node.api_key}")
+    print(f"  将自动同步全部活跃站点")
+
+    token = db.create_registration_token(node.name, node.node_type)
+    ip = _detect_manager_ip() or "<manager_ip>"
+    url = f"http://{ip}:{MANAGER_PORT}"
+    print(f"\n  一键部署命令：")
+    print(f"  curl -fsSL \"{url}/install.sh?token={token.token}&manager={url}\" | bash")
+
+
+def wizard_token():
+    nodes = db.list_nodes()
+    if not nodes:
+        print("  暂无节点。请先添加节点。"); return
+
+    print()
+    for i, n in enumerate(nodes):
+        print(f"  [{i+1}] {n.name} ({n.ip}) — {n.node_type}")
+
+    try:
+        idx = int(ask("选择节点序号", "1")) - 1
+        node = nodes[idx]
+    except (ValueError, IndexError):
+        print("  无效选择"); return
+
+    token = db.create_registration_token(node.name, node.node_type)
+    ip = _detect_manager_ip() or "<manager_ip>"
+    url = f"http://{ip}:{MANAGER_PORT}"
+    print(f"\n  Token: {token.token}")
+    print(f"\n  在目标节点执行：")
+    print(f"  curl -fsSL \"{url}/install.sh?token={token.token}&manager={url}\" | bash")
+    print(f"\n  或手动注册后用此 API Key 同步：")
+    n = db.get_node_by_name(node.name)
+    if n:
+        print(f"  python3 /opt/cdn-agent/cdn_agent.py --register --manager {url} --token {token.token}")
+
+
+def wizard_list_nodes():
+    nodes = db.list_nodes()
+    if not nodes:
+        print("  暂无节点。"); return
+    print(f"\n  {'名称':<18} {'IP':<18} {'类型':<8} {'状态':<8} {'站点':<6} {'最后在线'}")
+    print(f"  {'-'*18} {'-'*18} {'-'*8} {'-'*8} {'-'*6} {'-'*18}")
+    for n in nodes:
+        sites = db.get_node_sites(n.id)
+        print(f"  {n.name:<18} {n.ip:<18} {n.node_type:<8} {n.status:<8} {len(sites):<6} {n.last_seen or '-'}")
+
+
+# ── SSL ───────────────────────────────────────
+def wizard_ssl_import():
+    print("\n  === 导入 SSL 证书 ===")
+    wizard_list_sites()
+    domain = ask("站点域名")
+    if not domain:
+        print("  取消。"); return
+    site = db.get_site_by_domain(domain)
+    if not site:
+        print(f"  站点不存在: {domain}"); return
+
+    mode = ask("方式 (dir/file)", "dir")
+    if mode == "dir":
+        cert_dir = ask("证书目录", f"/opt/cdn-manager/ssl/{domain.lstrip('*.')}")
+        cert = ssl_mgr.import_cert(domain=site.domain, cert_dir=cert_dir)
+    else:
+        cp = ask("证书文件路径")
+        kp = ask("密钥文件路径")
+        cert = ssl_mgr.import_cert(domain=site.domain, cert_path=cp, key_path=kp)
+
+    if not cert:
+        print("  ✗ 导入失败"); return
+    cert.name = site.domain
+    cert = db.save_certificate(cert)
+    site.certificate_id = cert.id
+    db.update_site(site)
+    db.bump_all_node_hashes()
+    print(f"  ✓ 证书已导入证书库并绑定: name={cert.name} expires={cert.expires_at}")
+
+
+def wizard_ssl_info():
+    domain = ask("站点域名或证书名")
+    if not domain: return
+    site = db.get_site_by_domain(domain)
+    cert = db.get_certificate_by_name(domain)
+    if not cert and site:
+        cert = db.get_site_certificate(site.id)
+    if not cert:
+        print("  未找到该证书"); return
+    print(f"\n  name:     {cert.name}")
+    print(f"  domains:  {cert.domains}")
+    print(f"  issued:   {cert.issued_at}")
+    print(f"  expires:  {cert.expires_at}")
+    print(f"  renew:    {'是' if ssl_mgr.needs_renewal(cert) else '否'}")
+    if site:
+        print(f"  bound_to: {site.domain}")
+
+
+# ── Main Menu ─────────────────────────────────
+def show_menu():
+    os.system("clear 2>/dev/null || cls 2>/dev/null || true")
+    manager_ip = _detect_manager_ip() or "未知"
+    print(f"\n{'='*50}")
+    print(f"  CDN 管理引导 — Manager: http://{manager_ip}:{MANAGER_PORT}")
+    print(f"{'='*50}")
+    print(f"  站点: {len(db.list_sites())}  |  节点: {len(db.list_nodes())}")
+    print(f"{'─'*50}")
+    print(f"  [1] 添加站点")
+    print(f"  [2] 查看/修改站点")
+    print(f"  [3] 删除站点")
+    print(f"  {'─'*48}")
+    print(f"  [4] 添加节点")
+    print(f"  [5] 查看节点")
+    print(f"  [6] 生成节点安装命令")
+    print(f"  [7] 删除节点")
+    print(f"  {'─'*48}")
+    print(f"  [8] 导入 SSL 证书")
+    print(f"  [9] 查看 SSL 证书")
+    print(f"  {'─'*48}")
+    print(f"  [p] 修改面板登录密码")
+    print(f"  [q] 退出")
+    print(f"{'='*50}")
+
+
+def main():
+    while True:
+        show_menu()
+        c = input("  选择: ").strip()
+
+        if c == "1":
+            wizard_add_site()
+        elif c == "2":
+            wizard_update_site()
+        elif c == "3":
+            domain = ask("要删除的站点域名")
+            if domain:
+                site = db.get_site_by_domain(domain)
+                if site and confirm(f"确定删除 {domain}？"):
+                    db.delete_site(site.id)
+                    db.bump_all_node_hashes()
+                    print("  ✓ 已删除")
+        elif c == "4":
+            wizard_add_node()
+        elif c == "5":
+            wizard_list_nodes()
+        elif c == "6":
+            wizard_token()
+        elif c == "7":
+            name = ask("要删除的节点名")
+            if name:
+                node = db.get_node_by_name(name)
+                if node and confirm(f"确定删除 {name}？"):
+                    db.delete_node(node.id)
+                    db.bump_all_node_hashes()
+                    print("  ✓ 已删除")
+        elif c == "8":
+            wizard_ssl_import()
+        elif c == "9":
+            wizard_ssl_info()
+        elif c.lower() == "p":
+            from manager.config import PANEL_USER as cu, PANEL_PASS as cp, set_panel_credentials
+            u = ask("新用户名", cu)
+            p = ask("新密码", cp)
+            if u and p and confirm("确认修改？"):
+                set_panel_credentials(u, p)
+                print("  ✓ 密码已修改，正在重启 Manager...")
+                os.system("systemctl restart cdn-manager 2>/dev/null || pkill -f run_manager.py")
+                print("  ✓ 已重启，新密码生效")
+        elif c.lower() == "q":
+            print("  再见。")
+            break
+        else:
+            print("  无效选项。")
+
+        input("\n  按 Enter 继续...")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n  再见。")

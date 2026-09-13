@@ -1,0 +1,19 @@
+[Unit]
+Description=CDN Manager - Central Control Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/cdn-manager
+ExecStart=/usr/bin/python3 /opt/cdn-manager/run_manager.py \
+    --host 0.0.0.0 \
+    --port 8080
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

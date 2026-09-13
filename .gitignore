@@ -1,0 +1,31 @@
+# 证书/密钥文件
+ssl/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 数据库
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+
+# 打包文件
+*.zip
+*.tar.gz
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 运行时
+.setup_done
+*.log
