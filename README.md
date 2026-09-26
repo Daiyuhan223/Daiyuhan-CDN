@@ -83,7 +83,8 @@
 Daiyuhan-CDN/
 ├── setup.sh                    # Manager 一键部署
 ├── dyh-cdn.sh                  # 在线一键安装脚本
-├── update.sh                   # 无损升级脚本（保留 data/）
+├── update.sh                   # 无损升级脚本（保留 data/，需自备新代码）
+├── upgrade.sh                  # 在线一键升级（自动拉取最新代码 + update.sh）
 ├── dyh-cdn                     # 交互式 CLI 引导工具
 ├── uninstall.sh                # 卸载脚本
 ├── run_manager.py              # Manager 启动入口
@@ -496,7 +497,16 @@ Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 
 ## 无损升级
 
-拿到新版代码后，在服务器上运行 `update.sh` 即可无损升级（保留 `data/`，数据库自动迁移）：
+**在线一键升级（推荐）**——自动拉取最新代码并升级，无需手动下载：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
+
+# 升级到指定 tag / 分支
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.0.1
+```
+
+**本地升级**——已有新版代码在服务器上时：
 
 ```bash
 cd /tmp
@@ -506,9 +516,9 @@ chmod +x update.sh
 bash update.sh
 ```
 
-`update.sh` 会：备份当前代码（可回滚）→ 停服同步代码（排除 `data/`）→ Python 语法自检（失败自动还原）→ 重启服务 → 健康检查 → 清空节点 hash 触发全量重同步。边缘节点 agent 会在一小时内通过 `/api/v1/agent/download` 自更新。
+升级流程会：备份当前代码（可回滚）→ 停服同步代码（排除 `data/`）→ Python 语法自检（失败自动还原）→ 重启服务 → 健康检查 → 清空节点 hash 触发全量重同步。边缘节点 agent 会在一小时内通过 `/api/v1/agent/download` 自更新。
 
-> 注意：升级请用 `update.sh`，**不要**重跑 `dyh-cdn.sh`（它会 `rm -rf` 整个安装目录）。
+> 注意：升级请用 `upgrade.sh` / `update.sh`，**不要**重跑 `dyh-cdn.sh`（它会 `rm -rf` 整个安装目录）。
 
 ---
 
