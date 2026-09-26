@@ -241,7 +241,7 @@ python3 manager/cli.py node token -n <节点名>
 | 配置路径 | `/www/server/panel/vhost/nginx/cdn-*.conf` |
 | SSL 路径 | `/www/server/nginx/conf/ssl/<domain>/` |
 | 缓存路径 | `/www/server/nginx/cdn_cache` |
-| 特性 | 只注入 `proxy_cache_path`，不覆盖宝塔 `nginx.conf`，只清理自己的 `cdn-*.conf` |
+| 特性 | 只注入独立缓存 zone 文件，不覆盖宝塔 `nginx.conf`，只清理自己的 `cdn-*.conf` |
 
 **Baota 节点创建：**
 
@@ -254,13 +254,21 @@ python3 manager/cli.py node add -n baota-01 -i <IP> --type baota --baota-url htt
 
 **Baota 节点部署 Agent：**
 
+推荐直接用注册 Token 一键安装（`install.sh` 会自动识别宝塔，不安装系统 Nginx、不抢占 80/443）：
+
 ```bash
-pip3 install requests --break-system-packages
-python3 /opt/cdn-agent/cdn_agent.py --register --manager http://<manager_ip>:8080 --token <TOKEN>
-python3 /opt/cdn-agent/cdn_agent.py --once
+# Manager 上生成 token 后，在节点执行输出的 curl 命令即可
 ```
 
-> **注意：** Agent 会自动检测 `/www/server/panel` 存在 → 切到 Baota 路径。Baota 面板的安全入口需填在 `baota-url` 里（如 `http://IP:8888/abc123`）。
+手动部署 Agent（Agent 仅依赖 Python 标准库，**无需 pip / requests**）：
+
+```bash
+python3 /opt/cdn-agent/cdn_agent.py --register --manager http://<manager_ip>:8080 --token <TOKEN>
+python3 /opt/cdn-agent/cdn_agent.py --once
+python3 /opt/cdn-agent/cdn_agent.py --diag   # 查看探测到的环境（宝塔/系统 nginx 路径）
+```
+
+> **注意：** Agent 通过 **宝塔 Nginx 二进制与配置**是否真实存在来判定环境（不再只看 `/www/server/panel` 目录）；优先采用节点注册时在 Manager 上设置的类型。缓存 zone 以独立文件 `00-cdn-cache.conf` 注入宝塔 vhost 目录，不手改宝塔主配置。Baota 面板的安全入口需填在 `baota-url` 里（如 `http://IP:8888/abc123`）。
 
 ### 已部署节点升级 Agent
 
@@ -385,13 +393,16 @@ dyh-cdn    # 或 cd /opt/cdn-manager && python3 dyh-cdn
 
 | 特性 | 说明 |
 |------|------|
+| 零依赖 | 仅用 Python 标准库（urllib），无需 pip / requests，规避 PEP668 / distutils 问题 |
+| 环境探测 | 依据宝塔 Nginx 二进制/配置真实存在判定环境，优先采用 Manager 上注册的节点类型 |
+| 正确管控 | 按环境使用正确的 Nginx 二进制与配置做 `-t`/reload/start，绝不误操作系统 Nginx |
 | 备份回滚 | 每次应用新配置前自动备份；`nginx -t` 失败自动回滚上次可用配置 |
-| 同步验证 | 配置应用成功后回传 `sync_token`，Manager 标记"已验证" |
+| 同步验证 | 配置应用且 **nginx 真正在运行**后才回传 `sync_token`，否则上报 `nginx_down` |
+| 自愈 | 每轮轮询检测 nginx 未运行且配置存在时自动拉起 |
+| 空间清理 | 磁盘高水位时清理 nginx 日志 / journald / apt 临时文件 / 旧备份 |
 | 自更新 | 每小时从 Manager 检查自身版本，不同则自动替换并重启 |
-| 自动适配 | 检测 Baota → 自动切路径，不覆盖宝塔配置 |
-| systemctl | 全部通过 systemd 管理 Nginx |
-| 证书校验 | 写入后检查文件是否为空、可读 |
 | 增量同步 | 只更新变更的文件 |
+| 环境诊断 | `cdn_agent.py --diag` 打印探测到的环境与路径 |
 
 ---
 

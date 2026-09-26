@@ -20,6 +20,16 @@
 - **交互式引导 `dyh-cdn`** 与 **CLI**（`site` / `node` / `ssl` / `tokens` / `config`）。
 - **一键部署/升级/卸载脚本**：`setup.sh`、`dyh-cdn.sh`、`update.sh`、`uninstall.sh`。
 
+### 修复（Baota 混合环境）
+- `install.sh` 安装前真实探测宝塔环境；宝塔机不再安装系统 Nginx，并停用冲突的 `nginx.service`，避免抢 80/443。
+- Agent 环境探测改为依据宝塔 Nginx 二进制/配置是否真实存在，并优先采用 Manager 上注册的节点类型，杜绝配置写错目录。
+- Agent 按环境使用正确的 Nginx 二进制做 `nginx -t` / reload / start（宝塔不再误用系统 `systemctl`）。
+- 宝塔缓存 zone 改为独立 include 文件注入，不再手改宝塔主配置，修复 `zone "cdn_cache" is unknown`。
+- 备份/回滚重构，修复宝塔站点目录 basename 不匹配导致回滚失效的问题。
+- Agent 去掉 `requests`，仅用标准库 `urllib`，根治 Debian 12 PEP668 拦截、Debian 11 污染系统 Python、`idna.core` 缺失与 pip 死循环。
+- 应用配置后校验 Nginx 真实运行状态，未运行不上报"已验证"，并上报 `nginx_down` 状态。
+- Manager 依赖改为 **apt 优先安装**（`python3-flask/python3-jinja2/python3-requests`），避免 PEP668 拦截与系统 Python 污染，同时保留 pip 兜底。
+
 ### 说明
 - `cache purge` 未提供：nginx.org 官方 Nginx 无 `ngx_cache_purge` 模块，清缓存请直接删缓存文件。
 

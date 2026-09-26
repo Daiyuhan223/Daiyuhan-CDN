@@ -30,10 +30,18 @@ mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 [ "$SRC" != "$INSTALL_DIR" ] && cp -r "$SRC"/* "$INSTALL_DIR/"
 
-# Python deps
+# Python deps: prefer distro packages (no PEP668 issue, no /usr/local pollution),
+# fall back to pip only if a package is missing.
 echo "[3/4] Installing Python deps..."
 cd "$INSTALL_DIR"
-pip3 install -q flask jinja2 requests 2>/dev/null || pip3 install -q flask jinja2 requests --break-system-packages
+if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-flask python3-jinja2 python3-requests 2>/dev/null; then
+    echo "  installed via apt (python3-flask / python3-jinja2 / python3-requests)"
+else
+    echo "  apt packages unavailable, falling back to pip..."
+    pip3 install -q flask jinja2 requests 2>/dev/null \
+        || pip3 install -q flask jinja2 requests --break-system-packages
+fi
+python3 -c "import flask, jinja2, requests" || { echo "ERROR: Python deps missing"; exit 1; }
 
 # Systemd
 echo "[4/4] Installing service..."

@@ -99,6 +99,16 @@ echo "  语法自检通过"
 echo ""
 echo "[4/5] 刷新 systemd 并启动..."
 cp "$INSTALL_DIR/manager/cdn-manager.service" /etc/systemd/system/cdn-manager.service
+
+# 确保 Python 依赖（优先 apt，避免 PEP668 / 系统 Python 污染）
+if ! python3 -c "import flask, jinja2, requests" >/dev/null 2>&1; then
+    echo "  安装缺失的 Python 依赖..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-flask python3-jinja2 python3-requests 2>/dev/null \
+        || pip3 install -q flask jinja2 requests --break-system-packages 2>/dev/null \
+        || pip3 install -q flask jinja2 requests 2>/dev/null \
+        || echo "  WARN: Python 依赖安装失败，请手动检查"
+fi
+
 ln -sf "$INSTALL_DIR/dyh-cdn" /usr/local/bin/dyh-cdn
 systemctl daemon-reload
 systemctl enable cdn-manager >/dev/null 2>&1 || true

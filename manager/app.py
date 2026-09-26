@@ -353,6 +353,7 @@ def register_node():
     return jsonify({
         "node_id": node.id,
         "node_name": node.name,
+        "node_type": node.node_type,
         "api_key": node.api_key,
         "sites_assigned": len(db.get_node_sites(node.id)),
         "message": "node registered successfully",

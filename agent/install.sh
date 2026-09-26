@@ -1,8 +1,10 @@
 #!/bin/bash
+# CDN Edge Node Installer — auto-detects Baota vs blank Debian.
 set -e
 
 MANAGER_URL="${MANAGER_URL:-}"
 REGISTER_TOKEN="${REGISTER_TOKEN:-}"
+AGENT_DIR="/opt/cdn-agent"
 
 if [ -z "$MANAGER_URL" ] || [ -z "$REGISTER_TOKEN" ]; then
     echo "ERROR: MANAGER_URL or REGISTER_TOKEN not set"
@@ -16,53 +18,82 @@ echo "============================================"
 
 [ "$(id -u)" != "0" ] && echo "ERROR: must be root" && exit 1
 
-# Detect OS
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    echo "Detected: $NAME $VERSION_ID"
+    echo "Detected OS: $NAME $VERSION_ID"
+fi
+
+# ── Environment detection ─────────────────────────────────────────
+# Real detection: Baota nginx binary/config present (not just the panel dir).
+IS_BAOTA=0
+if [ -x /www/server/nginx/sbin/nginx ] || [ -f /www/server/nginx/conf/nginx.conf ]; then
+    IS_BAOTA=1
+fi
+
+if [ "$IS_BAOTA" = "1" ]; then
+    echo "Detected environment: Baota (using Baota Nginx, will NOT install system Nginx)"
 else
-    echo "WARNING: Cannot detect OS, proceeding..."
+    echo "Detected environment: blank Debian (will install nginx.org Nginx)"
 fi
 
 echo ""
-echo "[1/5] Installing Nginx (nginx.org official)..."
+echo "[1/5] Installing packages..."
 apt-get update -qq
-apt-get install -y -qq curl gnupg lsb-release
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates
 
-curl --connect-timeout 10 --retry 2 -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
-    | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+# Agent is stdlib-only (urllib); no pip / no requests required.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3
+
+echo "[2/5] Setting up Nginx..."
+
+if [ "$IS_BAOTA" = "1" ]; then
+    # Do NOT install a second Nginx. Stop any competing system nginx service
+    # so it can't grab :80/:443 from Baota.
+    if systemctl list-unit-files 2>/dev/null | grep -q '^nginx\.service'; then
+        echo "  Disabling conflicting system nginx.service (Baota manages Nginx)..."
+        systemctl stop nginx 2>/dev/null || true
+        systemctl disable nginx 2>/dev/null || true
+    fi
+    if [ ! -x /www/server/nginx/sbin/nginx ]; then
+        echo "ERROR: Baota detected but /www/server/nginx/sbin/nginx not found."
+        echo "       Please install Nginx from the Baota panel first."
+        exit 1
+    fi
+else
+    # Blank Debian: install nginx.org official Nginx.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gnupg lsb-release
+    curl --connect-timeout 10 --retry 2 -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+        | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
 http://nginx.org/packages/debian $(lsb_release -cs) nginx" \
-    | tee /etc/apt/sources.list.d/nginx.list >/dev/null
-apt-get update -qq
+        | tee /etc/apt/sources.list.d/nginx.list >/dev/null
+    apt-get update -qq
 
-# Kill any existing nginx processes, remove old init scripts
-systemctl stop nginx 2>/dev/null || true
-/etc/init.d/nginx stop 2>/dev/null || true
-pkill -9 nginx 2>/dev/null || true
-sleep 1
+    systemctl stop nginx 2>/dev/null || true
+    /etc/init.d/nginx stop 2>/dev/null || true
+    pkill -9 nginx 2>/dev/null || true
+    sleep 1
 
-if dpkg -l nginx-extras &>/dev/null 2>&1; then
-    apt-get remove -y -qq nginx-extras nginx-common
+    if dpkg -l nginx-extras &>/dev/null 2>&1; then
+        apt-get remove -y -qq nginx-extras nginx-common
+    fi
+    rm -f /etc/init.d/nginx /etc/systemd/system/nginx.service 2>/dev/null
+
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::="--force-confold" nginx
+    systemctl daemon-reload
+    systemctl enable nginx
 fi
-rm -f /etc/init.d/nginx /etc/systemd/system/nginx.service 2>/dev/null
-
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::="--force-confold" nginx
-systemctl daemon-reload
-
-echo "[2/5] Installing Python..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip python3-full python3-venv
-pip3 install -q requests 2>/dev/null || pip3 install -q requests --break-system-packages 2>/dev/null || pip3 install -q requests
 
 echo "[3/5] Deploying agent..."
-mkdir -p /opt/cdn-agent
+mkdir -p "$AGENT_DIR" /opt/cdn-agent/backup
 
 if curl -s --connect-timeout 5 "${MANAGER_URL}/health" >/dev/null 2>&1; then
-    curl --connect-timeout 10 --retry 2 -sSL "${MANAGER_URL}/api/v1/agent/download" -o /opt/cdn-agent/cdn_agent.py
+    curl --connect-timeout 10 --retry 2 -sSL "${MANAGER_URL}/api/v1/agent/download" -o "$AGENT_DIR/cdn_agent.py"
 else
     echo "ERROR: Manager unreachable at ${MANAGER_URL}"
     exit 1
 fi
+chmod +x "$AGENT_DIR/cdn_agent.py"
 
 cat > /etc/systemd/system/cdn-agent.service << 'EOF'
 [Unit]
@@ -83,16 +114,75 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-mkdir -p /etc/nginx/conf.d/cdn /etc/nginx/ssl /var/cache/nginx/cdn_cache
 systemctl daemon-reload
-systemctl enable nginx
+systemctl enable cdn-agent
 
 echo "[4/5] Registering with manager..."
-python3 /opt/cdn-agent/cdn_agent.py --register --manager "$MANAGER_URL" --token "$REGISTER_TOKEN"
+python3 "$AGENT_DIR/cdn_agent.py" --register --manager "$MANAGER_URL" --token "$REGISTER_TOKEN"
 
 echo "[5/5] Starting agent..."
-systemctl enable cdn-agent
-systemctl start cdn-agent
+systemctl restart cdn-agent
+
+# ── Post-install validation ───────────────────────────────────────
+echo ""
+echo "Validating..."
+sleep 3
+
+NGX_BIN="/usr/sbin/nginx"
+NGX_CONF="/etc/nginx/nginx.conf"
+SITE_DIR="/etc/nginx/conf.d/cdn"
+if [ "$IS_BAOTA" = "1" ]; then
+    NGX_BIN="/www/server/nginx/sbin/nginx"
+    NGX_CONF="/www/server/nginx/conf/nginx.conf"
+    SITE_DIR="/www/server/panel/vhost/nginx"
+fi
+
+FAIL=0
+
+if [ -x "$NGX_BIN" ] && "$NGX_BIN" -t -c "$NGX_CONF" >/dev/null 2>&1; then
+    echo "  [ok] nginx config valid ($NGX_BIN)"
+else
+    echo "  [!!] nginx config test failed: $NGX_BIN -t -c $NGX_CONF"
+    FAIL=1
+fi
+
+if pgrep -f "$NGX_BIN" >/dev/null 2>&1 || systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "  [ok] nginx process running"
+else
+    echo "  [!!] nginx is not running"
+    FAIL=1
+fi
+
+# 只有配置了 SSL 站点时才要求 443 监听（新节点尚未下发 SSL 站点属正常）
+if grep -rqs "ssl_certificate" "$SITE_DIR"/*.conf 2>/dev/null; then
+    if command -v ss >/dev/null 2>&1; then
+        LISTEN="$(ss -ltn 2>/dev/null)"
+    else
+        LISTEN="$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null)"
+    fi
+    if echo "$LISTEN" | grep -qE ':443|:01BB'; then
+        echo "  [ok] port 443 listening"
+    else
+        echo "  [!!] port 443 is NOT listening (HTTPS sites will fail)"
+        FAIL=1
+    fi
+else
+    echo "  [--] no SSL site yet, skip 443 check"
+fi
+
+if systemctl is-active --quiet cdn-agent; then
+    echo "  [ok] cdn-agent service active"
+else
+    echo "  [!!] cdn-agent service not active"
+    FAIL=1
+fi
 
 echo ""
-echo "Done. systemctl status cdn-agent"
+if [ "$FAIL" = "0" ]; then
+    echo "Done. Node healthy."
+else
+    echo "安装完成，但存在告警。请检查："
+    echo "  - nginx:  $NGX_BIN -t -c $NGX_CONF ; journalctl -u cdn-agent -n 50"
+    echo "  - agent:  python3 $AGENT_DIR/cdn_agent.py --diag"
+fi
+echo "  systemctl status cdn-agent"
