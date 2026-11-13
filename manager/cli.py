@@ -423,6 +423,12 @@ def cmd_ssl_sync_dir(args):
 
 
 
+def cmd_ssl_dedup(args):
+    from manager.cert_sync import dedup_certificates
+    res = dedup_certificates(db)
+    print(f"Done: merged {res['groups_merged']} group(s), deleted {res['deleted']} duplicate cert(s)")
+
+
 def cmd_cache_purge(args):
     site = db.get_site_by_domain(args.domain)
     if not site:
@@ -574,6 +580,7 @@ def main():
     psd.add_argument("--dir", "-D", dest="dir", required=True, help="Directory to scan recursively")
     psd.add_argument("--no-bind", action="store_true", help="Do not auto-bind to unbound matching sites")
     psd.set_defaults(func=cmd_ssl_sync_dir)
+    sp.add_parser("dedup", help="Merge duplicate certificates in the library").set_defaults(func=cmd_ssl_dedup)
 
     # tokens
     p = sub.add_parser("tokens", help="List registration tokens")

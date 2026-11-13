@@ -41,6 +41,26 @@ def _choose_primary_domain(domains):
     return ds[0] if ds else ""
 
 
+def _domains_set(domains_str):
+    return frozenset(d.strip().lower() for d in (domains_str or "").split(",") if d.strip())
+
+
+def _match_existing(db, cert):
+    """Find an existing library entry for this cert: first by identical content,
+    then by identical domain set (so a re-issued cert updates in place instead
+    of creating a duplicate under a different name)."""
+    certs = db.list_certificates()
+    for c in certs:
+        if c.fullchain_pem == cert.fullchain_pem and c.privkey_pem == cert.privkey_pem:
+            return c
+    ds = _domains_set(cert.domains)
+    if ds:
+        for c in certs:
+            if _domains_set(c.domains) == ds:
+                return c
+    return None
+
+
 def sync_dir(db, ssl_mgr, root, bind=True):
     """Scan `root` recursively, import certs, optionally bind unbound sites.
 
@@ -73,13 +93,25 @@ def sync_dir(db, ssl_mgr, root, bind=True):
             if not cert:
                 result["failed"] += 1
                 continue
-            cert.name = primary
 
-            existing = db.get_certificate_by_name(primary)
-            if existing and existing.fullchain_pem == cert.fullchain_pem \
-               and existing.privkey_pem == cert.privkey_pem:
-                cid = existing.id
+            # Match an existing entry by content / domain-set and update it in
+            # place (prevents duplicates like "*.example.com" vs "example.com").
+            match = _match_existing(db, cert)
+            if match:
+                same = (match.fullchain_pem == cert.fullchain_pem
+                        and match.privkey_pem == cert.privkey_pem)
+                if same:
+                    cid = match.id
+                else:
+                    cert.name = match.name
+                    cert.id = match.id
+                    cert = db.save_certificate(cert)
+                    cid = cert.id
+                    changed = True
+                    result["imported"] += 1
+                    result["certificates"].append({"domain": match.name, "id": cid})
             else:
+                cert.name = primary
                 cert = db.save_certificate(cert)
                 cid = cert.id
                 changed = True
@@ -103,3 +135,54 @@ def sync_dir(db, ssl_mgr, root, bind=True):
     else:
         result["changed"] = False
     return result
+
+
+def dedup_certificates(db):
+    """Merge certificate-library entries that describe the same cert set.
+
+    Groups by the exact domain set; per group keeps the entry bound to the most
+    sites (ties -> smallest id), copies the newest content into it, rebinds all
+    sites to the keeper, then deletes the duplicates.
+    """
+    certs = db.list_certificates()
+    groups = {}
+    for c in certs:
+        key = _domains_set(c.domains)
+        if key:
+            groups.setdefault(key, []).append(c)
+
+    merged_groups = 0
+    deleted = 0
+    for _key, group in groups.items():
+        if len(group) < 2:
+            continue
+
+        def bound_count(c):
+            return len(db.certificate_sites(c.id)) if c.id else 0
+
+        keeper = max(group, key=lambda c: (bound_count(c), -(c.id or 0)))
+        newest = max(group, key=lambda c: c.issued_at or "")
+
+        # ensure keeper holds the newest content
+        if group and (keeper.fullchain_pem != newest.fullchain_pem
+                      or keeper.privkey_pem != newest.privkey_pem):
+            keeper.fullchain_pem = newest.fullchain_pem
+            keeper.privkey_pem = newest.privkey_pem
+            keeper.domains = newest.domains
+            keeper.issued_at = newest.issued_at or keeper.issued_at
+            keeper.expires_at = newest.expires_at or keeper.expires_at
+            db.save_certificate(keeper)
+
+        for other in group:
+            if other.id == keeper.id:
+                continue
+            for site in db.certificate_sites(other.id):
+                site.certificate_id = keeper.id
+                db.update_site(site)
+            db.delete_certificate(other.id)
+            deleted += 1
+        merged_groups += 1
+
+    if deleted:
+        db.bump_all_node_hashes()
+    return {"groups_merged": merged_groups, "deleted": deleted}

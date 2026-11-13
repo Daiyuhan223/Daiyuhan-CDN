@@ -407,6 +407,15 @@ def sync_cert_dir():
     return jsonify(res)
 
 
+@app.route("/api/v1/certificates/dedup", methods=["POST"])
+def dedup_certificates_api():
+    """Panel action: merge duplicate certificates in the library."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "unauthorized"}), 401
+    from .cert_sync import dedup_certificates
+    return jsonify(dedup_certificates(db))
+
+
 @app.route("/api/v1/certificates/issue", methods=["POST"])
 def issue_certificate():
     data = request.get_json() or {}

@@ -313,6 +313,7 @@ python3 manager/cli.py ssl info -d <域名>                  # 查看站点/同�
 python3 manager/cli.py ssl import -d <域名> --cert-dir <目录> [--name <名称>]
 python3 manager/cli.py ssl import -d <域名> --cert <证书路径> --key <密钥路径> [--name <名称>]
 python3 manager/cli.py ssl sync-dir --dir <目录> [--no-bind]   # 扫描目录(AllinSSL部署)自动导入+绑定
+python3 manager/cli.py ssl dedup                            # 合并重复证书（保留绑定最多的）
 python3 manager/cli.py site update -d <域名> --cert <证书ID>   # 手动绑定
 python3 manager/cli.py site update -d <域名> --no-cert         # 解绑
 ```

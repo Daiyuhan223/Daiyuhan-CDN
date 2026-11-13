@@ -76,6 +76,7 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
       <div class="d-flex gap-2 mb-2 align-items-center">
         <input class="form-control form-control-sm" id="certSyncDir" style="max-width:420px" placeholder="/opt/cdn-manager/data/allinssl（留空用默认目录）">
         <button class="btn btn-outline-success btn-sm text-nowrap" onclick="syncCertDir()">同步证书目录</button>
+        <button class="btn btn-outline-warning btn-sm text-nowrap" onclick="dedupCerts()">清理重复证书</button>
       </div>
       <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>
         <th>名称</th><th>覆盖域名</th><th>签发时间</th><th>到期时间</th><th>状态</th><th>绑定站点</th><th>操作</th>
@@ -224,6 +225,7 @@ async function doCertImport(){const name=document.getElementById('certName').val
   try{await api('/certificates/import',{method:'POST',body:data});toast('证书已导入证书库','success');closeModal('modalCertImport');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 async function renewCert(id){try{await api('/certificates/'+id+'/renew',{method:'POST'});toast('已续期','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 async function syncCertDir(){const dir=document.getElementById('certSyncDir').value.trim();try{const d=await api('/certificates/sync-dir',{method:'POST',body:dir?{dir}:{}});toast(`同步完成：导入 ${d.imported}，绑定 ${d.bound}，跳过 ${d.skipped}，失败 ${d.failed}`,'success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function dedupCerts(){if(!confirm('合并库中重复证书？保留绑定站点最多的一个，其余删除并把站点重绑到保留项。'))return;try{const d=await api('/certificates/dedup',{method:'POST',body:{}});toast(`已合并 ${d.groups_merged} 组，删除 ${d.deleted} 条重复证书`,'success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 async function delCert(id){const c=allCerts.find(x=>x.id===id);if(!confirm(`删除证书 #${id}（${c?c.name:''}）？将解除其绑定的站点。`))return;try{await api('/certificates/'+id,{method:'DELETE'});toast('已删除','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 
 // ── Modal helpers ───────────────────────
