@@ -38,6 +38,9 @@ PANEL_USER, PANEL_PASS = get_panel_credentials()
 
 DB_PATH = os.environ.get("CDN_DB_PATH", os.path.join(_DATA_DIR, "cdn.db"))
 
+# Directory scanned for external cert deploy (e.g. AllinSSL) by panel/CLI
+CERT_SYNC_DIR = os.environ.get("CDN_CERT_SYNC_DIR", os.path.join(_DATA_DIR, "allinssl"))
+
 ACME_SH_PATH = os.environ.get("ACME_SH_PATH", "/root/.acme.sh/acme.sh")
 ACME_DNS_ENV = {
     "Ali_Key": os.environ.get("Ali_Key", ""),

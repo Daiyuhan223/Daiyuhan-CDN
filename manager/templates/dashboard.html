@@ -73,6 +73,10 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
     </div>
     <div class="card-body">
       <p class="small text-muted mb-2">证书集中保存在此库中，站点 → 编辑 → “使用证书”下拉选择绑定；通配符证书可复用给多个子域名站点。未绑定同名/通配证书的站点也会自动匹配。</p>
+      <div class="d-flex gap-2 mb-2 align-items-center">
+        <input class="form-control form-control-sm" id="certSyncDir" style="max-width:420px" placeholder="/opt/cdn-manager/data/allinssl（留空用默认目录）">
+        <button class="btn btn-outline-success btn-sm text-nowrap" onclick="syncCertDir()">同步证书目录</button>
+      </div>
       <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr>
         <th>名称</th><th>覆盖域名</th><th>签发时间</th><th>到期时间</th><th>状态</th><th>绑定站点</th><th>操作</th>
       </tr></thead><tbody id="certTable"></tbody></table></div>
@@ -219,6 +223,7 @@ function toggleCertMode(){const v=document.getElementById('certMode').value;docu
 async function doCertImport(){const name=document.getElementById('certName').value.trim();if(!name){toast('请填写名称','danger');return}const data={name};const m=document.getElementById('certMode').value;if(m==='dir'){data.domain=name;data.cert_dir=document.getElementById('certDir').value.trim()}else if(m==='file'){data.domain=name;data.cert_path=document.getElementById('certFile').value.trim();data.key_path=document.getElementById('certKey').value.trim()}else{data.domain=name;data.cert_pem=document.getElementById('certPem').value;data.key_pem=document.getElementById('certKeyPem').value}
   try{await api('/certificates/import',{method:'POST',body:data});toast('证书已导入证书库','success');closeModal('modalCertImport');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 async function renewCert(id){try{await api('/certificates/'+id+'/renew',{method:'POST'});toast('已续期','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
+async function syncCertDir(){const dir=document.getElementById('certSyncDir').value.trim();try{const d=await api('/certificates/sync-dir',{method:'POST',body:dir?{dir}:{}});toast(`同步完成：导入 ${d.imported}，绑定 ${d.bound}，跳过 ${d.skipped}，失败 ${d.failed}`,'success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 async function delCert(id){const c=allCerts.find(x=>x.id===id);if(!confirm(`删除证书 #${id}（${c?c.name:''}）？将解除其绑定的站点。`))return;try{await api('/certificates/'+id,{method:'DELETE'});toast('已删除','success');refreshCerts();refreshDash()}catch(e){toast(e.message,'danger')}}
 
 // ── Modal helpers ───────────────────────

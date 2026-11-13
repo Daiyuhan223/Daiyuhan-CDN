@@ -3,12 +3,13 @@ import secrets
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, Response, session, redirect
 
-from .config import MANAGER_HOST, MANAGER_PORT, PANEL_USER, PANEL_PASS, get_panel_credentials
+from .config import MANAGER_HOST, MANAGER_PORT, PANEL_USER, PANEL_PASS, get_panel_credentials, CERT_SYNC_DIR
 from .database import Database
 from .models import Site, Node, RegistrationToken
 from .auth import init_auth, require_api_key
 from .nginx_gen import generate_node_config
 from .ssl_manager import SSLManager
+from .cert_sync import sync_dir as import_certs_from_dir
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -390,6 +391,20 @@ def register_node():
 def list_certificates():
     certs = db.list_certificates()
     return jsonify({"certificates": [_cert_to_dict(c) for c in certs]})
+
+
+@app.route("/api/v1/certificates/sync-dir", methods=["POST"])
+def sync_cert_dir():
+    """Panel action: scan a directory (e.g. AllinSSL deploy target) and import."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json() or {}
+    root = (data.get("dir") or CERT_SYNC_DIR).strip()
+    bind = data.get("bind", True)
+    res = import_certs_from_dir(db, ssl_mgr, root, bind=bind)
+    if res.get("error", "").startswith("directory not found"):
+        return jsonify(res), 400
+    return jsonify(res)
 
 
 @app.route("/api/v1/certificates/issue", methods=["POST"])

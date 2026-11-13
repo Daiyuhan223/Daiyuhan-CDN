@@ -451,6 +451,7 @@ nginx -s reload
 - 以证书 CN/SAN 自动识别域名；内容无变化则跳过（不触发无谓 reload）
 - 仅对**未绑定证书**的站点自动绑定；已显式绑定其他证书的站点不覆盖
 - 手动执行：`python3 manager/cli.py ssl sync-dir --dir <目录> [--no-bind]`
+- **面板操作**：Web 面板 →「证书库」→ 填目录 →「同步证书目录」按钮（留空使用默认 `data/allinssl`）
 
 ---
 
