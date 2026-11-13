@@ -41,6 +41,18 @@ DB_PATH = os.environ.get("CDN_DB_PATH", os.path.join(_DATA_DIR, "cdn.db"))
 # Directory scanned for external cert deploy (e.g. AllinSSL) by panel/CLI
 CERT_SYNC_DIR = os.environ.get("CDN_CERT_SYNC_DIR", os.path.join(_DATA_DIR, "allinssl"))
 
+
+def _env_bool(name, default=True):
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+# Auto sync (import) from CERT_SYNC_DIR + auto dedup/delete duplicates
+CERT_AUTOSYNC = _env_bool("CDN_CERT_AUTOSYNC", True)
+CERT_AUTOSYNC_INTERVAL = int(os.environ.get("CDN_CERT_AUTOSYNC_INTERVAL", "300"))
+
 ACME_SH_PATH = os.environ.get("ACME_SH_PATH", "/root/.acme.sh/acme.sh")
 ACME_DNS_ENV = {
     "Ali_Key": os.environ.get("Ali_Key", ""),

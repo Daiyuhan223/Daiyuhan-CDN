@@ -23,7 +23,9 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
-    from manager.app import app
+    from manager.app import app, start_cert_autosync
+
+    start_cert_autosync()
 
     proto = "http"
 

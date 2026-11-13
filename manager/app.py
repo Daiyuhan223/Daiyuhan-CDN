@@ -1,15 +1,19 @@
 import os
 import secrets
+import time
+import threading
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, Response, session, redirect
 
-from .config import MANAGER_HOST, MANAGER_PORT, PANEL_USER, PANEL_PASS, get_panel_credentials, CERT_SYNC_DIR
+from .config import (MANAGER_HOST, MANAGER_PORT, PANEL_USER, PANEL_PASS,
+                     get_panel_credentials, CERT_SYNC_DIR,
+                     CERT_AUTOSYNC, CERT_AUTOSYNC_INTERVAL)
 from .database import Database
 from .models import Site, Node, RegistrationToken
 from .auth import init_auth, require_api_key
 from .nginx_gen import generate_node_config
 from .ssl_manager import SSLManager
-from .cert_sync import sync_dir as import_certs_from_dir
+from .cert_sync import sync_dir as import_certs_from_dir, dedup_certificates
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -616,11 +620,50 @@ def serve_gui():
 
 def run_manager(host=None, port=None):
     db.bump_all_node_hashes()
+    start_cert_autosync()
     app.run(
         host=host or MANAGER_HOST,
         port=port or MANAGER_PORT,
         debug=False,
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Certificate auto-sync (import + dedup) background thread
+# ═══════════════════════════════════════════════════════════════
+
+_autosync_started = False
+
+
+def _cert_autosync_loop():
+    time.sleep(15)  # let the service settle after start
+    while True:
+        try:
+            if os.path.isdir(CERT_SYNC_DIR):
+                res = import_certs_from_dir(db, ssl_mgr, CERT_SYNC_DIR, bind=True)
+                if res.get("imported") or res.get("bound") or res.get("failed"):
+                    app.logger.warning(
+                        "cert autosync: imported=%s bound=%s skipped=%s failed=%s",
+                        res.get("imported"), res.get("bound"),
+                        res.get("skipped"), res.get("failed"))
+            dd = dedup_certificates(db)
+            if dd.get("deleted"):
+                app.logger.warning(
+                    "cert autosync dedup: merged %s group(s), deleted %s duplicate(s)",
+                    dd.get("groups_merged"), dd.get("deleted"))
+        except Exception as e:
+            app.logger.warning("cert autosync error: %s", e)
+        time.sleep(max(30, CERT_AUTOSYNC_INTERVAL))
+
+
+def start_cert_autosync():
+    global _autosync_started
+    if _autosync_started or not CERT_AUTOSYNC:
+        return
+    _autosync_started = True
+    threading.Thread(target=_cert_autosync_loop, name="cert-autosync", daemon=True).start()
+    app.logger.warning("cert autosync started: dir=%s interval=%ss",
+                       CERT_SYNC_DIR, CERT_AUTOSYNC_INTERVAL)
 
 
 if __name__ == "__main__":

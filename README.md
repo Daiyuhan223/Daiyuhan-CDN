@@ -453,6 +453,7 @@ nginx -s reload
 - 仅对**未绑定证书**的站点自动绑定；已显式绑定其他证书的站点不覆盖
 - 手动执行：`python3 manager/cli.py ssl sync-dir --dir <目录> [--no-bind]`
 - **面板操作**：Web 面板 →「证书库」→ 填目录 →「同步证书目录」按钮（留空使用默认 `data/allinssl`）
+- **全自动**：Manager 后台默认每 5 分钟扫描 `CDN_CERT_SYNC_DIR`，自动导入新证书、自动合并删除重复条目（无需手动点按钮）。可用 `CDN_CERT_AUTOSYNC=0` 关闭、`CDN_CERT_AUTOSYNC_INTERVAL` 调间隔。
 
 ---
 
@@ -517,6 +518,9 @@ python3 manager/cli.py site update -d www.example.com --clear-custom
 | `ACME_DNS_PLUGIN` | `dns_ali` | DNS 验证插件 |
 | `Ali_Key` / `Ali_Secret` | - | 阿里云 DNS API |
 | `CF_Token` / `CF_Email` | - | Cloudflare DNS API |
+| `CDN_CERT_SYNC_DIR` | `./data/allinssl` | AllinSSL 等外部证书部署目录（自动扫描） |
+| `CDN_CERT_AUTOSYNC` | `1` | 是否后台自动同步证书目录并自动合并重复（`0` 关闭） |
+| `CDN_CERT_AUTOSYNC_INTERVAL` | `300` | 自动同步间隔（秒） |
 
 Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 
