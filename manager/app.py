@@ -1,13 +1,15 @@
 import os
+import json
 import secrets
 import time
 import threading
+import urllib.request
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, Response, session, redirect
 
 from .config import (MANAGER_HOST, MANAGER_PORT, PANEL_USER, PANEL_PASS,
                      get_panel_credentials, CERT_SYNC_DIR,
-                     CERT_AUTOSYNC, CERT_AUTOSYNC_INTERVAL)
+                     CERT_AUTOSYNC, CERT_AUTOSYNC_INTERVAL, VERSION)
 from .database import Database
 from .models import Site, Node, RegistrationToken
 from .auth import init_auth, require_api_key
@@ -583,10 +585,58 @@ def health():
     return jsonify({
         "status": "ok",
         "server": "cdn-manager",
+        "version": VERSION,
         "sites": len(db.list_sites()),
         "nodes": len(db.list_nodes()),
         "certs": len(db.list_certificates()),
     })
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Version / update check
+# ═══════════════════════════════════════════════════════════════
+
+_UPDATE_REPO = "Daiyuhan223/Daiyuhan-CDN"
+_UPDATE_CACHE = {"ts": 0.0, "data": None}
+
+
+def _ver_tuple(v):
+    parts = []
+    for x in (v or "").lstrip("vV").split("."):
+        num = "".join(ch for ch in x if ch.isdigit())
+        parts.append(int(num) if num else 0)
+    return tuple(parts)
+
+
+@app.route("/api/v1/update-check", methods=["GET"])
+def update_check():
+    force = request.args.get("force") in ("1", "true", "yes")
+    now = time.time()
+    if not force and _UPDATE_CACHE["data"] and now - _UPDATE_CACHE["ts"] < 3600:
+        return jsonify(_UPDATE_CACHE["data"])
+
+    latest = ""
+    error = ""
+    try:
+        url = f"https://raw.githubusercontent.com/{_UPDATE_REPO}/main/VERSION"
+        req = urllib.request.Request(url, headers={"User-Agent": "Daiyuhan-CDN"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            latest = r.read().decode("utf-8", "replace").strip()
+    except Exception as e:
+        error = str(e)
+
+    avail = bool(latest) and _ver_tuple(latest) > _ver_tuple(VERSION)
+    data = {
+        "current": VERSION,
+        "latest": latest or VERSION,
+        "update_available": avail,
+        "repo": f"https://github.com/{_UPDATE_REPO}",
+        "releases": f"https://github.com/{_UPDATE_REPO}/releases",
+        "error": error,
+    }
+    _UPDATE_CACHE["ts"] = now
+    _UPDATE_CACHE["data"] = data
+    return jsonify(data)
 
 
 # ═══════════════════════════════════════════════════════════════

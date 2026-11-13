@@ -86,6 +86,7 @@ Daiyuhan-CDN/
 ├── upgrade.sh                  # 在线一键升级（自动拉取最新代码 + update.sh）
 ├── run_manager.py              # Manager 启动入口
 ├── requirements.txt            # Python 依赖
+├── VERSION                     # 版本号（面板更新检查用）
 ├── manager/                    # 控制面
 │   ├── app.py                  # Flask API + Web 面板路由
 │   ├── cli.py                  # 命令行工具
@@ -116,10 +117,10 @@ Daiyuhan-CDN/
 ### 一键安装 Manager（推荐）
 
 ```bash
-curl -fsSL https://cdn.huaiyi.ltd/d/dyh-cdn.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/dyh-cdn.sh | bash
 ```
 
-下载、解压、安装依赖、启动服务，全程自动。完成后访问面板或用 CLI 管理：
+脚本会自动从 GitHub 拉取最新代码（GitHub 不可达时回退到镜像 zip），安装依赖、启动服务，全程自动。完成后：
 
 ```bash
 cd /opt/cdn-manager && python3 manager/cli.py site list
@@ -351,6 +352,8 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 | SSL 证书 | 签发/导入（目录/文件/粘贴内容）/续期，到期提醒 |
 
 节点列表的"验证"列显示 🟢 已验证 / 🟡 待验证——节点成功应用配置并通过 `sync_token` 回传后变绿。
+
+导航栏显示当前版本，并提供 **「检查更新」** 按钮：会对比仓库 `VERSION` 文件，发现新版本时提示执行 `upgrade.sh` 升级（无外网时静默失败，不影响使用）。
 
 ---
 

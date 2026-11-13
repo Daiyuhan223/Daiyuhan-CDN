@@ -13,8 +13,11 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
 <body>
 
 <nav class="navbar navbar-dark bg-dark px-3">
-  <span class="navbar-brand">CDN Manager</span>
-  <span class="text-light small" id="managerStatus"></span>
+  <span class="navbar-brand">CDN Manager <small class="text-secondary" id="appVersion"></small></span>
+  <div class="d-flex align-items-center gap-2 ms-auto">
+    <button class="btn btn-sm btn-outline-light" onclick="checkUpdate(true)">检查更新</button>
+    <span class="text-light small" id="managerStatus"></span>
+  </div>
 </nav>
 <div class="toast-wrap" id="toastWrap"></div>
 
@@ -168,14 +171,15 @@ const API='/api/v1';
 let allSites=[], allNodes=[], allCerts=[], managerOk=false;
 
 // ── Toast / feedback ────────────────────
-function toast(msg, type){type=type||'info';const colors={success:'#155724',danger:'#721c24',info:'#0c5460',warning:'#856404'};const bg={success:'#d4edda',danger:'#f8d7da',info:'#d1ecf1',warning:'#fff3cd'};const w=document.getElementById('toastWrap');const el=document.createElement('div');el.className='toast show align-items-center mb-2';el.style.background=bg[type]||bg.info;el.innerHTML=`<div class="d-flex"><div class="toast-body" style="color:${colors[type]}">${msg}</div><button type="button" class="btn-close me-2 m-auto" onclick="this.parentElement.parentElement.remove()"></button></div>`;w.appendChild(el);setTimeout(()=>el.remove(),4000)}
+function toast(msg, type, dur){type=type||'info';const colors={success:'#155724',danger:'#721c24',info:'#0c5460',warning:'#856404'};const bg={success:'#d4edda',danger:'#f8d7da',info:'#d1ecf1',warning:'#fff3cd'};const w=document.getElementById('toastWrap');const el=document.createElement('div');el.className='toast show align-items-center mb-2';el.style.background=bg[type]||bg.info;el.innerHTML=`<div class="d-flex"><div class="toast-body" style="color:${colors[type]}">${msg}</div><button type="button" class="btn-close me-2 m-auto" onclick="this.parentElement.parentElement.remove()"></button></div>`;w.appendChild(el);setTimeout(()=>el.remove(),dur||4000)}
 async function api(url,opt){opt=opt||{};if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);if(opt.body)opt.headers=Object.assign({'Content-Type':'application/json'},opt.headers||{});const r=await fetch(API+url,opt);const ct=r.headers.get('content-type')||'';const d=ct.includes('json')?await r.json():await r.text();if(!r.ok)throw new Error((d&&d.error)||(typeof d==='string'?d:'请求失败 '+r.status));return d}
 
 // ── Tabs ────────────────────────────────
 document.querySelectorAll('#tabs .nav-link').forEach(el=>el.addEventListener('click',function(e){e.preventDefault();document.querySelectorAll('#tabs .nav-link').forEach(t=>t.classList.remove('active'));this.classList.add('active');document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.getElementById('tab-'+this.dataset.tab).style.display='';if(this.dataset.tab!=='dash')refreshData(this.dataset.tab)}));
 
-async function init(){await refreshAll();refreshStats();setInterval(refreshAll,30000);setInterval(refreshStats,30000)}
-async function refreshAll(){try{const h=await fetch('/health');const d=await h.json();managerOk=d.status==='ok';document.getElementById('managerStatus').innerText=`Manager ${managerOk?'正常运行':'异常'} · ${d.sites||0} 站点 · ${d.nodes||0} 节点 · ${d.certs??'-'} 证书`}catch(e){managerOk=false;document.getElementById('managerStatus').innerText='Manager 离线'}refreshDash()}
+async function init(){await refreshAll();refreshStats();checkUpdate(false);setInterval(refreshAll,30000);setInterval(refreshStats,30000)}
+async function refreshAll(){try{const h=await fetch('/health');const d=await h.json();managerOk=d.status==='ok';const ve=document.getElementById('appVersion');if(ve&&d.version)ve.innerText='v'+d.version;document.getElementById('managerStatus').innerText=`Manager ${managerOk?'正常运行':'异常'} · ${d.sites||0} 站点 · ${d.nodes||0} 节点 · ${d.certs??'-'} 证书`}catch(e){managerOk=false;document.getElementById('managerStatus').innerText='Manager 离线'}refreshDash()}
+async function checkUpdate(force){try{const r=await fetch('/api/v1/update-check'+(force?'?force=1':''));const d=await r.json();const ve=document.getElementById('appVersion');if(ve&&d.current)ve.innerText='v'+d.current;if(d.update_available){toast(`发现新版本 ${d.latest}（当前 ${d.current}），执行 upgrade.sh 升级`,'warning',10000)}else if(force){toast(d.error?('检查更新失败：'+d.error):`已是最新版本 v${d.current}`,'success')}}catch(e){if(force)toast('检查更新失败','danger')}}
 
 // ── Dashboard ───────────────────────────
 async function refreshDash(){try{const n=(await api('/nodes')).nodes||[];allNodes=n;renderStats(n);renderNodeActivity(n)}catch(e){}}

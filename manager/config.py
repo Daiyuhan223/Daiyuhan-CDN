@@ -38,6 +38,18 @@ PANEL_USER, PANEL_PASS = get_panel_credentials()
 
 DB_PATH = os.environ.get("CDN_DB_PATH", os.path.join(_DATA_DIR, "cdn.db"))
 
+
+def _read_version():
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION")
+    try:
+        with open(p) as f:
+            return f.read().strip() or "0.0.0"
+    except Exception:
+        return "0.0.0"
+
+
+VERSION = os.environ.get("CDN_VERSION") or _read_version()
+
 # Directory scanned for external cert deploy (e.g. AllinSSL) by panel/CLI
 CERT_SYNC_DIR = os.environ.get("CDN_CERT_SYNC_DIR", os.path.join(_DATA_DIR, "allinssl"))
 
