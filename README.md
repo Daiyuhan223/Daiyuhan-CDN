@@ -2,7 +2,6 @@
 
 [![Version](https://img.shields.io/badge/version-v0.0.1-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
@@ -19,12 +18,12 @@
 - [快速开始](#快速开始)
 - [节点类型](#节点类型)
 - [CLI 命令](#cli-命令)
-- [交互式引导 dyh-cdn](#交互式引导-dyh-cdn)
 - [Web 管理面板](#web-管理面板)
 - [Agent 特性](#agent-特性)
 - [缓存管理](#缓存管理)
 - [SSL 证书管理](#ssl-证书管理)
 - [WebSocket 支持](#websocket-支持)
+- [自定义站点 Nginx 配置](#自定义站点-nginx-配置)
 - [配置说明](#配置说明)
 - [无损升级](#无损升级)
 - [故障排查](#故障排查)
@@ -85,12 +84,8 @@ Daiyuhan-CDN/
 ├── dyh-cdn.sh                  # 在线一键安装脚本
 ├── update.sh                   # 无损升级脚本（保留 data/，需自备新代码）
 ├── upgrade.sh                  # 在线一键升级（自动拉取最新代码 + update.sh）
-├── dyh-cdn                     # 交互式 CLI 引导工具
-├── uninstall.sh                # 卸载脚本
 ├── run_manager.py              # Manager 启动入口
 ├── requirements.txt            # Python 依赖
-├── CHANGELOG.md                # 版本变更记录
-├── LICENSE                     # MIT 许可证
 ├── manager/                    # 控制面
 │   ├── app.py                  # Flask API + Web 面板路由
 │   ├── cli.py                  # 命令行工具
@@ -124,10 +119,10 @@ Daiyuhan-CDN/
 curl -fsSL https://cdn.huaiyi.ltd/d/dyh-cdn.sh | bash
 ```
 
-下载、解压、安装依赖、启动服务，全程自动。完成后：
+下载、解压、安装依赖、启动服务，全程自动。完成后访问面板或用 CLI 管理：
 
 ```bash
-dyh-cdn    # 交互式引导
+cd /opt/cdn-manager && python3 manager/cli.py site list
 ```
 
 ### 手动部署 Manager
@@ -149,7 +144,7 @@ chmod +x setup.sh
 | 用户名 | `Admin` |
 | 密码 | `cdn123456` |
 
-> 修改密码：`dyh-cdn` → `[p] 修改面板登录密码`，改后自动重启生效。
+> 修改密码：编辑 `/opt/cdn-manager/data/panel.conf`（`user=` / `pass=`），或设置环境变量 `CDN_PANEL_USER` / `CDN_PANEL_PASS`，改后重启 `cdn-manager` 生效。
 
 ### 添加站点
 
@@ -293,7 +288,7 @@ python3 manager/cli.py site list
 python3 manager/cli.py site add -d <域名> -o <源站URL> [--ttl <秒>] [--no-ssl] [--force-https] [--cert <证书ID>]
 python3 manager/cli.py site add -d <域名> --redirect <目标URL> [--no-ssl]
 python3 manager/cli.py site info -d <域名>
-python3 manager/cli.py site update -d <域名> [--origin <新源站>] [--ttl <秒>] [--enable|--disable] [--redirect <URL>|--no-redirect] [--cache|--no-cache] [--https|--no-https] [--cert <ID>|--no-cert]
+python3 manager/cli.py site update -d <域名> [--origin <新源站>] [--ttl <秒>] [--enable|--disable] [--redirect <URL>|--no-redirect] [--cache|--no-cache] [--https|--no-https] [--cert <ID>|--no-cert] [--custom-server-file <文件>] [--custom-location-file <文件>] [--clear-custom]
 python3 manager/cli.py site delete -d <域名>
 ```
 
@@ -317,6 +312,7 @@ python3 manager/cli.py ssl issue -d <域名> [--name <名称>] [--self-signed]  
 python3 manager/cli.py ssl info -d <域名>                  # 查看站点/同名证书
 python3 manager/cli.py ssl import -d <域名> --cert-dir <目录> [--name <名称>]
 python3 manager/cli.py ssl import -d <域名> --cert <证书路径> --key <密钥路径> [--name <名称>]
+python3 manager/cli.py ssl sync-dir --dir <目录> [--no-bind]   # 扫描目录(AllinSSL部署)自动导入+绑定
 python3 manager/cli.py site update -d <域名> --cert <证书ID>   # 手动绑定
 python3 manager/cli.py site update -d <域名> --no-cert         # 解绑
 ```
@@ -342,39 +338,6 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 
 ---
 
-## 交互式引导 dyh-cdn
-
-```bash
-dyh-cdn    # 或 cd /opt/cdn-manager && python3 dyh-cdn
-```
-
-```
-==================================================
-  CDN 管理引导 — Manager: http://<ip>:8080
-==================================================
-  站点: 2  |  节点: 3
-──────────────────────────────────────────────────
-  [1] 添加站点
-  [2] 查看/修改站点
-  [3] 删除站点
-  ────────────────────────────────────────────────
-  [4] 添加节点
-  [5] 查看节点
-  [6] 生成节点安装命令
-  [7] 删除节点
-  ────────────────────────────────────────────────
-  [8] 导入 SSL 证书
-  [9] 查看 SSL 证书
-  ────────────────────────────────────────────────
-  [p] 修改面板登录密码
-  [q] 退出
-==================================================
-```
-
-`setup.sh` 自动创建 `/usr/local/bin/dyh-cdn` 软链接，任意目录可直接执行。
-
----
-
 ## Web 管理面板
 
 访问 `http://<ip>:8080/cdn-gui/`，需登录。
@@ -397,12 +360,13 @@ dyh-cdn    # 或 cd /opt/cdn-manager && python3 dyh-cdn
 | 零依赖 | 仅用 Python 标准库（urllib），无需 pip / requests，规避 PEP668 / distutils 问题 |
 | 环境探测 | 依据宝塔 Nginx 二进制/配置真实存在判定环境，优先采用 Manager 上注册的节点类型 |
 | 正确管控 | 按环境使用正确的 Nginx 二进制与配置做 `-t`/reload/start，绝不误操作系统 Nginx |
-| 备份回滚 | 每次应用新配置前自动备份；`nginx -t` 失败自动回滚上次可用配置 |
+| 备份回滚 | 每次应用新配置前自动备份；`nginx -t` 失败自动回滚上次可用配置（备份/回滚只针对本 agent 管理的文件，不碰宝塔原有配置与证书） |
+| 证书全量同步 | 证书变更时删除本 agent 管理的证书目录并全量重传；宝塔仅动带 `.cdn-agent` 标记的目录，绝不动宝塔自带证书 |
 | 同步验证 | 配置应用且 **nginx 真正在运行**后才回传 `sync_token`，否则上报 `nginx_down` |
 | 自愈 | 每轮轮询检测 nginx 未运行且配置存在时自动拉起 |
 | 空间清理 | 磁盘高水位时清理 nginx 日志 / journald / apt 临时文件 / 旧备份 |
 | 自更新 | 每小时从 Manager 检查自身版本，不同则自动替换并重启 |
-| 增量同步 | 只更新变更的文件 |
+| 站点配置增量 | 站点 conf 按内容哈希只更新变更的文件 |
 | 环境诊断 | `cdn_agent.py --diag` 打印探测到的环境与路径 |
 
 ---
@@ -459,6 +423,35 @@ nginx -s reload
 
 支持 `--cert-dir` 自动发现或 `--cert`/`--key` 指定文件，面板支持直接粘贴 PEM 内容。导入时校验 SAN/CN 与域名匹配，并提示自签证书。
 
+### 对接 AllinSSL 自动部署
+
+用 AllinSSL 的**现成部署方式**把证书落到 Manager 的一个目录，CDN 扫描导入并自动绑定同名/通配站点（无需给 AllinSSL 写插件）。
+
+**1) AllinSSL 用「远程部署 (SSH)」推到 Manager**（推荐）
+- 目标：Manager 服务器，SSH 用户 root
+- 保存目录：如 `/opt/cdn-manager/data/allinssl`（可含域名子目录）
+- 证书/私钥：`fullchain.pem` / `privkey.pem`
+- **部署后执行命令**：
+  ```bash
+  python3 /opt/cdn-manager/manager/cli.py ssl sync-dir --dir /opt/cdn-manager/data/allinssl
+  ```
+  续签成功后立即导入 + 绑定 + 触发节点热更（60s 内生效）。
+
+**2) AllinSSL 是 Docker、用「本地部署」写卷**
+- 把宿主机目录挂进容器，例如：`-v /opt/allinssl-out:/app/deploy`
+- AllinSSL 本地部署目标路径填 `/app/deploy`（会写到宿主机 `/opt/allinssl-out`）
+- Manager 宿主机加定时扫描（兜底，例如每 5 分钟）：
+  ```bash
+  echo '*/5 * * * * root python3 /opt/cdn-manager/manager/cli.py ssl sync-dir --dir /opt/allinssl-out >/var/log/cdn-cert-sync.log 2>&1' \
+    | tee /etc/cron.d/cdn-cert-sync
+  ```
+
+**行为说明**
+- 递归扫描目录，自动配对 `fullchain/cert/chain` 与 `privkey/.key`
+- 以证书 CN/SAN 自动识别域名；内容无变化则跳过（不触发无谓 reload）
+- 仅对**未绑定证书**的站点自动绑定；已显式绑定其他证书的站点不覆盖
+- 手动执行：`python3 manager/cli.py ssl sync-dir --dir <目录> [--no-bind]`
+
 ---
 
 ## WebSocket 支持
@@ -472,6 +465,38 @@ proxy_set_header Connection "upgrade";
 ```
 
 普通 HTTP/HTTPS 请求不受影响，`ws://`/`wss://` 连接可正常代理到源站。
+
+---
+
+## 自定义站点 Nginx 配置
+
+生成的站点 conf 由 Manager 统管并随同步下发，**直接在节点上改会被 agent 覆盖**。要自定义，请在 Manager 侧给站点写入自定义片段（持久化、随配置下发）：
+
+- **自定义 Server 配置**：追加到 `server {}` 末尾，可加 `location`、`rewrite`、`deny/allow`、`add_header` 等
+- **自定义 location / 配置**：追加到 `location / {}` 末尾，可调 `proxy_set_header`、`proxy_read_timeout`、`proxy_buffering` 等
+
+面板：站点管理 → 编辑 → 两个自定义文本框。
+CLI：把片段写到文件再导入。
+
+```bash
+# server 级（例：把 /api 反代到内部服务）
+cat > /tmp/site-extra.conf <<'EOF'
+location /api/ {
+    proxy_pass http://10.0.0.8:9000;
+    proxy_set_header Host $host;
+}
+EOF
+python3 manager/cli.py site update -d www.example.com --custom-server-file /tmp/site-extra.conf
+
+# location / 级（例：调大超时、加请求头）
+echo 'proxy_read_timeout 300s;' > /tmp/site-loc.conf
+python3 manager/cli.py site update -d www.example.com --custom-location-file /tmp/site-loc.conf
+
+# 清除自定义
+python3 manager/cli.py site update -d www.example.com --clear-custom
+```
+
+> 注意：片段会**原样追加**，别与生成配置里已有的单值指令重复（如重复 `proxy_cache`、重复定义同名 `location`），否则 `nginx -t` 会报错，agent 会回滚并上报 `nginx_down`。先在节点用 `nginx -t` 验证或改完观察面板节点状态。
 
 ---
 
@@ -527,8 +552,6 @@ bash update.sh
 - 项目：**Daiyuhan-CDN** v0.0.1
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
-- 许可证：MIT（见 [LICENSE](LICENSE)）
-- 变更记录：[CHANGELOG.md](CHANGELOG.md)
 
 ---
 

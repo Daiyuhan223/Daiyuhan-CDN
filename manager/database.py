@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS sites (
     redirect_url TEXT NOT NULL DEFAULT '',
     force_https INTEGER DEFAULT 0,
     certificate_id INTEGER,
+    custom_conf TEXT NOT NULL DEFAULT '',
+    custom_location_conf TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -87,6 +89,8 @@ def _row_to_site(row) -> Site:
         redirect_url=row["redirect_url"] or "",
         force_https=bool(row["force_https"]) if "force_https" in row.keys() else False,
         certificate_id=row["certificate_id"] if "certificate_id" in row.keys() and row["certificate_id"] else None,
+        custom_conf=row["custom_conf"] if "custom_conf" in row.keys() else "",
+        custom_location_conf=row["custom_location_conf"] if "custom_location_conf" in row.keys() else "",
         created_at=row["created_at"]
     )
 
@@ -155,6 +159,12 @@ class Database:
                 conn.execute("ALTER TABLE sites ADD COLUMN certificate_id INTEGER")
             except sqlite3.DatabaseError:
                 pass
+            # Migration: per-site custom nginx config
+            for col in ("custom_conf", "custom_location_conf"):
+                try:
+                    conn.execute(f"ALTER TABLE sites ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                except sqlite3.DatabaseError:
+                    pass
             self._migrate_legacy_certs(conn)
             # Migration: add columns + fix old CHECK constraint
             for col, typ in [("baota_url", "TEXT DEFAULT ''"), ("baota_key", "TEXT DEFAULT ''")]:
@@ -226,11 +236,11 @@ class Database:
     def create_site(self, site: Site) -> Site:
         with self._get_conn() as conn:
             cur = conn.execute(
-                """INSERT INTO sites (domain, origin_url, origin_host, cache_ttl, ssl_enabled, cache_enabled, redirect_url, force_https, certificate_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO sites (domain, origin_url, origin_host, cache_ttl, ssl_enabled, cache_enabled, redirect_url, force_https, certificate_id, custom_conf, custom_location_conf)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (site.domain, site.origin_url, site.origin_host, site.cache_ttl,
                  int(site.ssl_enabled), int(site.cache_enabled), site.redirect_url,
-                 int(site.force_https), site.certificate_id)
+                 int(site.force_https), site.certificate_id, site.custom_conf, site.custom_location_conf)
             )
             site.id = cur.lastrowid
             return site
@@ -253,11 +263,12 @@ class Database:
     def update_site(self, site: Site):
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE sites SET domain=?, origin_url=?, origin_host=?, cache_ttl=?, ssl_enabled=?, active=?, cache_enabled=?, redirect_url=?, force_https=?, certificate_id=?
+                """UPDATE sites SET domain=?, origin_url=?, origin_host=?, cache_ttl=?, ssl_enabled=?, active=?, cache_enabled=?, redirect_url=?, force_https=?, certificate_id=?, custom_conf=?, custom_location_conf=?
                    WHERE id=?""",
                 (site.domain, site.origin_url, site.origin_host, site.cache_ttl,
                  int(site.ssl_enabled), int(site.active), int(site.cache_enabled),
-                 site.redirect_url, int(site.force_https), site.certificate_id, site.id)
+                 site.redirect_url, int(site.force_https), site.certificate_id,
+                 site.custom_conf, site.custom_location_conf, site.id)
             )
 
     def delete_site(self, site_id: int):
@@ -447,17 +458,18 @@ class Database:
                 ).fetchone()
                 if row:
                     return _row_to_certificate(row)
-        rows = conn.execute("SELECT * FROM certificates").fetchall()
-        target = domain.lower()
-        for r in rows:
-            for d in (r["domains"] or "").split(","):
-                d = d.strip().lower()
-                if not d:
-                    continue
-                if d == target:
-                    return _row_to_certificate(r)
-                if d.startswith("*.") and (target.endswith("." + d[2:]) or target == d[2:]):
-                    return _row_to_certificate(r)
+
+            rows = conn.execute("SELECT * FROM certificates").fetchall()
+            target = domain.lower()
+            for r in rows:
+                for d in (r["domains"] or "").split(","):
+                    d = d.strip().lower()
+                    if not d:
+                        continue
+                    if d == target:
+                        return _row_to_certificate(r)
+                    if d.startswith("*.") and (target.endswith("." + d[2:]) or target == d[2:]):
+                        return _row_to_certificate(r)
         return None
 
     def site_certificate_id(self, site_id: int) -> Optional[int]:
@@ -517,7 +529,8 @@ class Database:
             {"domain": s.domain, "origin_url": s.origin_url, "cache_ttl": s.cache_ttl,
              "ssl_enabled": s.ssl_enabled, "cache_enabled": s.cache_enabled,
              "redirect_url": s.redirect_url, "force_https": s.force_https,
-             "certificate_id": s.certificate_id}
+             "certificate_id": s.certificate_id,
+             "custom_conf": s.custom_conf, "custom_location_conf": s.custom_location_conf}
             for s in sites
         ], sort_keys=True)
         return hashlib.sha256(data.encode()).hexdigest()

@@ -77,14 +77,13 @@ else
         --exclude='./__pycache__' --exclude='*.pyc' -cf - .) | (cd "$INSTALL_DIR" && tar -xf -)
     echo "  (提示: tar 模式不删除旧文件；如需彻底清理请安装 rsync)"
 fi
-chmod +x "$INSTALL_DIR/dyh-cdn" "$INSTALL_DIR/setup.sh" "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
 
 echo ""
 echo "[3/5] Python 语法自检..."
 cd "$INSTALL_DIR"
 PYFILES=$(find . -maxdepth 3 -name '*.py' -not -path './data/*' | tr '\n' ' ')
-if ! python3 -m py_compile $PYFILES 2>/tmp/cdn_pyerr || \
-   ! python3 -c "compile(open('dyh-cdn', encoding='utf-8').read(), 'dyh-cdn', 'exec')" 2>>/tmp/cdn_pyerr; then
+if ! python3 -m py_compile $PYFILES 2>/tmp/cdn_pyerr; then
     echo "ERROR: 语法自检失败，回滚到上一个可用版本..."
     systemctl stop cdn-manager 2>/dev/null || true
     restore_backup "$BK"
@@ -109,7 +108,6 @@ if ! python3 -c "import flask, jinja2, requests" >/dev/null 2>&1; then
         || echo "  WARN: Python 依赖安装失败，请手动检查"
 fi
 
-ln -sf "$INSTALL_DIR/dyh-cdn" /usr/local/bin/dyh-cdn
 systemctl daemon-reload
 systemctl enable cdn-manager >/dev/null 2>&1 || true
 systemctl restart cdn-manager
@@ -125,8 +123,7 @@ for i in $(seq 1 20); do
 done
 if [ "$OK" != "1" ]; then
     echo "ERROR: 服务未通过健康检查。查看日志: journalctl -u cdn-manager -n 50"
-    echo "可回滚: bash -c 'source <(sed -n \"/^restore_backup()/,/^}/p\" \"$0\") 2>/dev/null' 2>/dev/null; cd \"$BACKUP_ROOT/$TS\" && echo \"见 $BACKUP_ROOT\" "
-    echo "最简单回滚: systemctl stop cdn-manager; rm -rf \"$INSTALL_DIR\"/{manager,templates,agent,dyh-cdn,run_manager.py,*.sh,requirements.txt}; cp -r \"$BK/\"* \"$INSTALL_DIR/\"; systemctl start cdn-manager"
+    echo "最简单回滚: systemctl stop cdn-manager; rm -rf \"$INSTALL_DIR\"/{manager,templates,agent,run_manager.py,*.sh,requirements.txt}; cp -r \"$BK/\"* \"$INSTALL_DIR/\"; systemctl start cdn-manager"
     exit 1
 fi
 
@@ -143,7 +140,7 @@ echo ""
 echo "============================================"
 echo " 升级完成!"
 echo "  备份目录 : $BK"
-echo "  回滚方法 : systemctl stop cdn-manager; rm -rf \"$INSTALL_DIR\"/{manager,templates,agent,dyh-cdn,run_manager.py,requirements.txt}; cp -r \"$BK/\"* \"$INSTALL_DIR/\"; systemctl start cdn-manager"
+echo "  回滚方法 : systemctl stop cdn-manager; rm -rf \"$INSTALL_DIR\"/{manager,templates,agent,run_manager.py,requirements.txt}; cp -r \"$BK/\"* \"$INSTALL_DIR/\"; systemctl start cdn-manager"
 echo ""
 echo "  边缘节点将在 60s 内自动重同步新配置；"
 echo "  新版 agent（nginx 自愈 / 磁盘自动清理）将通过自更新在 1 小时内自动下发，"

@@ -46,8 +46,7 @@ python3 -c "import flask, jinja2, requests" || { echo "ERROR: Python deps missin
 # Systemd
 echo "[4/4] Installing service..."
 cp "$INSTALL_DIR/manager/cdn-manager.service" /etc/systemd/system/
-chmod +x "$INSTALL_DIR/dyh-cdn"
-ln -sf "$INSTALL_DIR/dyh-cdn" /usr/local/bin/dyh-cdn
+chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable cdn-manager
 systemctl restart cdn-manager
@@ -60,7 +59,7 @@ if systemctl is-active --quiet cdn-manager; then
     echo "  API:    http://${IP}:8080/"
     echo "  GUI:    http://${IP}:8080/cdn-gui/"
     echo "  Health: http://${IP}:8080/health"
-    echo "  CLI:    dyh-cdn"
+    echo "  CLI:    python3 manager/cli.py"
     echo ""
     date > "$MARKER"
     [ -f "$SELF" ] && rm -f "$SELF"

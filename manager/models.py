@@ -16,6 +16,8 @@ class Site:
     redirect_url: str = ""
     force_https: bool = False
     certificate_id: Optional[int] = None
+    custom_conf: str = ""
+    custom_location_conf: str = ""
     created_at: str = ""
 
     def __post_init__(self):

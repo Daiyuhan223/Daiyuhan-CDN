@@ -47,12 +47,18 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3
 echo "[2/5] Setting up Nginx..."
 
 if [ "$IS_BAOTA" = "1" ]; then
-    # Do NOT install a second Nginx. Stop any competing system nginx service
-    # so it can't grab :80/:443 from Baota.
-    if systemctl list-unit-files 2>/dev/null | grep -q '^nginx\.service'; then
-        echo "  Disabling conflicting system nginx.service (Baota manages Nginx)..."
-        systemctl stop nginx 2>/dev/null || true
-        systemctl disable nginx 2>/dev/null || true
+    # Remove any leftover system Nginx (from a previously broken install) so it
+    # can't fight Baota over :80/:443 after a reboot.
+    systemctl stop nginx 2>/dev/null || true
+    systemctl disable nginx 2>/dev/null || true
+    if dpkg -l 2>/dev/null | grep -qE '^ii[[:space:]]+(nginx|nginx-common|nginx-full|nginx-extras|nginx-core)([[:space:]]|$)'; then
+        echo "  Purging leftover system Nginx packages (Baota manages Nginx)..."
+        DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq nginx nginx-common nginx-full nginx-extras nginx-core 2>/dev/null || true
+    fi
+    # If a systemd nginx unit somehow remains enabled, mask it so it never autostarts.
+    if systemctl list-unit-files 2>/dev/null | grep -q '^nginx\.service' \
+       && systemctl is-enabled nginx >/dev/null 2>&1; then
+        systemctl mask nginx 2>/dev/null || true
     fi
     if [ ! -x /www/server/nginx/sbin/nginx ]; then
         echo "ERROR: Baota detected but /www/server/nginx/sbin/nginx not found."
@@ -87,12 +93,25 @@ fi
 echo "[3/5] Deploying agent..."
 mkdir -p "$AGENT_DIR" /opt/cdn-agent/backup
 
-if curl -s --connect-timeout 5 "${MANAGER_URL}/health" >/dev/null 2>&1; then
-    curl --connect-timeout 10 --retry 2 -sSL "${MANAGER_URL}/api/v1/agent/download" -o "$AGENT_DIR/cdn_agent.py"
-else
+if ! curl -fsS --connect-timeout 5 "${MANAGER_URL}/health" >/dev/null 2>&1; then
     echo "ERROR: Manager unreachable at ${MANAGER_URL}"
     exit 1
 fi
+
+TMP_AGENT="$AGENT_DIR/cdn_agent.py.tmp"
+if ! curl -fsSL --connect-timeout 10 --retry 3 "${MANAGER_URL}/api/v1/agent/download" -o "$TMP_AGENT"; then
+    echo "ERROR: failed to download agent from ${MANAGER_URL}"
+    exit 1
+fi
+# Validate before installing: must look like our agent and be valid Python.
+if ! head -n1 "$TMP_AGENT" | grep -q '^#!' \
+   || ! grep -q 'def run(' "$TMP_AGENT" \
+   || ! python3 -c "compile(open('$TMP_AGENT', encoding='utf-8').read(), 'cdn_agent', 'exec')" 2>/dev/null; then
+    echo "ERROR: downloaded agent is invalid (manager returned an error page?)"
+    rm -f "$TMP_AGENT"
+    exit 1
+fi
+mv "$TMP_AGENT" "$AGENT_DIR/cdn_agent.py"
 chmod +x "$AGENT_DIR/cdn_agent.py"
 
 cat > /etc/systemd/system/cdn-agent.service << 'EOF'

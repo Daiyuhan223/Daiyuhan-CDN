@@ -77,5 +77,15 @@ server {
         proxy_buffer_size 4k;
         proxy_buffers 8 64k;
         proxy_busy_buffers_size 128k;
+{% if custom_location_conf %}
+        # == custom (location /) ==
+{{ custom_location_conf }}
+        # == /custom ==
+{% endif %}
     }
+{% if custom_conf %}
+    # == custom (server) ==
+{{ custom_conf }}
+    # == /custom ==
+{% endif %}
 }

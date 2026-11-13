@@ -40,6 +40,8 @@ def _site_to_dict(site: Site) -> dict:
         "redirect_url": site.redirect_url,
         "force_https": site.force_https,
         "certificate_id": site.certificate_id,
+        "custom_conf": site.custom_conf,
+        "custom_location_conf": site.custom_location_conf,
         "created_at": site.created_at,
     }
 
@@ -108,6 +110,8 @@ def create_site():
         cache_enabled=data.get("cache_enabled", True),
         force_https=data.get("force_https", False),
         certificate_id=data.get("certificate_id") or None,
+        custom_conf=data.get("custom_conf", "") or "",
+        custom_location_conf=data.get("custom_location_conf", "") or "",
     )
     site = db.create_site(site)
     db.bump_all_node_hashes()
@@ -131,7 +135,8 @@ def update_site(site_id):
 
     data = request.get_json() or {}
     for field in ["domain", "origin_url", "origin_host", "cache_ttl", "ssl_enabled", "active",
-                  "cache_enabled", "redirect_url", "force_https", "certificate_id"]:
+                  "cache_enabled", "redirect_url", "force_https", "certificate_id",
+                  "custom_conf", "custom_location_conf"]:
         if field in data:
             if field == "certificate_id":
                 setattr(site, field, data[field] or None)
@@ -283,8 +288,18 @@ def node_status(_node=None):
     node = _node
     data = request.get_json() or {}
     status = data.get("status", "online")
+
+    # Self-correct node type from the node's own detection (fixes legacy nodes
+    # whose stored type was wrong -> wrong ssl/cache paths). Force a re-sync.
+    detected = data.get("detected_type", "")
+    if detected in ("auto", "baota") and detected != node.node_type:
+        node.node_type = detected
+        db.update_node(node)
+        db.update_node_config_hash(node.id, None)
+        app.logger.warning("node %s type corrected to '%s', forcing re-sync", node.name, detected)
+
     db.update_node_status(node.id, status)
-    return jsonify({"status": "updated"})
+    return jsonify({"status": "updated", "node_type": node.node_type})
 
 
 @app.route("/api/v1/node/verify", methods=["POST"])
@@ -331,6 +346,7 @@ def register_node():
     data = request.get_json() or {}
     token_str = data.get("token", "").strip()
     node_ip = data.get("ip", request.remote_addr or "")
+    detected = data.get("detected_type", "")
 
     token = db.use_registration_token(token_str)
     if not token:
@@ -340,10 +356,16 @@ def register_node():
     if existing:
         return jsonify({"error": "node already exists, use sync endpoint", "api_key": existing.api_key}), 409
 
+    # Trust the node's on-the-ground detection over the token's declared type.
+    node_type = detected if detected in ("auto", "baota") else token.node_type
+    if detected in ("auto", "baota") and detected != token.node_type:
+        app.logger.warning("node %s detected as '%s' (token said '%s'); using '%s'",
+                           token.node_name, detected, token.node_type, node_type)
+
     node = Node(
         name=token.node_name,
         ip=node_ip,
-        node_type=token.node_type,
+        node_type=node_type,
         api_key=secrets.token_urlsafe(32),
         status="online",
     )
@@ -428,8 +450,11 @@ def renew_certificate(cert_id):
         return jsonify({"error": "certificate not found"}), 404
 
     domain = cert.name.lower()
-    if domain.startswith("*."):
-        domain = domain
+    if "." not in domain:
+        # name was a custom label, not a domain — renew against a SAN/CN
+        parts = [d.strip() for d in (cert.domains or "").split(",") if d.strip()]
+        if parts:
+            domain = parts[0]
     new_cert = ssl_mgr.issue_cert(domain, use_acme=True)
     if not new_cert:
         return jsonify({"error": "renewal failed"}), 500

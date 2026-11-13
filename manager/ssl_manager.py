@@ -222,6 +222,12 @@ class SSLManager:
 
         return cpath, kpath
 
+    def cert_domains(self, cert_pem: str):
+        return self._get_cert_domains(cert_pem)
+
+    def domain_matches(self, domain: str, domains) -> bool:
+        return self._domain_matches(domain, domains)
+
     def _get_cert_domains(self, cert_pem: str):
         domains = set()
         try:

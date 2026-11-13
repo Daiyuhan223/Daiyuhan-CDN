@@ -25,4 +25,10 @@ server {
 {% endif %}
 
     return 301 {{ redirect_url }}$request_uri;
+
+{% if custom_conf %}
+    # == custom (server) ==
+{{ custom_conf }}
+    # == /custom ==
+{% endif %}
 }

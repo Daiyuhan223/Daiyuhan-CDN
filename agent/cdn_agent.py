@@ -102,6 +102,7 @@ def resolve_env(config):
     if is_baota:
         ENV = {
             "is_baota": True,
+            "detected_type": "baota",
             "nginx_bin": BAOTA_NGINX_BIN,
             "nginx_conf": BAOTA_NGINX_CONF,
             "site_dir": BAOTA_SITE_DIR,
@@ -113,6 +114,7 @@ def resolve_env(config):
     else:
         ENV = {
             "is_baota": False,
+            "detected_type": "auto",
             "nginx_bin": find_system_nginx_bin(),
             "nginx_conf": "/etc/nginx/nginx.conf",
             "site_dir": "/etc/nginx/conf.d/cdn",
@@ -153,6 +155,15 @@ def http_post_json(url, obj, headers=None, timeout=20):
 
 # ── Nginx control ─────────────────────────────────────────────────
 
+def _baota_init():
+    """Baota manages Nginx through its own init script; use the same script so
+    we cooperate with the panel monitor instead of racing it."""
+    for p in ("/etc/init.d/nginx",):
+        if _exists(p):
+            return p
+    return None
+
+
 def nginx_test():
     binp = ENV.get("nginx_bin", "")
     if not _exists(binp):
@@ -166,15 +177,28 @@ def nginx_test():
     except Exception as e:
         log(f"nginx -t error: {e}")
         return False
+    out = (r.stderr or "") + (r.stdout or "")
     if r.returncode != 0:
-        log("nginx -t FAILED:\n" + (r.stderr or r.stdout or "")[-600:])
+        log("nginx -t FAILED:\n" + out[-600:])
         return False
+    # Conflicting server_name (e.g. Baota manual site vs our cdn-*.conf) is a
+    # warning, not an error, but silently drops one config — surface it.
+    if "conflicting server name" in out or "conflicting server_name" in out:
+        for line in out.splitlines():
+            if "conflicting" in line:
+                log(f"WARNING: {line.strip()}")
     return True
 
 
 def nginx_reload():
     if ENV.get("is_baota"):
-        r = subprocess.run([ENV["nginx_bin"], "-s", "reload"],
+        init = _baota_init()
+        if init:
+            r = subprocess.run([init, "reload"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                return True
+            log(f"init reload failed, fallback to binary: {r.stderr}")
+        r = subprocess.run([ENV["nginx_bin"], "-c", ENV["nginx_conf"], "-s", "reload"],
                            capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             log(f"nginx reload FAILED: {r.stderr}")
@@ -189,7 +213,14 @@ def nginx_reload():
 
 def nginx_start():
     if ENV.get("is_baota"):
-        r = subprocess.run([ENV["nginx_bin"]], capture_output=True, text=True, timeout=20)
+        init = _baota_init()
+        if init:
+            r = subprocess.run([init, "start"], capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                return True
+            log(f"init start failed, fallback to binary: {r.stderr}")
+        r = subprocess.run([ENV["nginx_bin"], "-c", ENV["nginx_conf"]],
+                           capture_output=True, text=True, timeout=20)
         return r.returncode == 0
     r = subprocess.run(["systemctl", "start", "nginx"], capture_output=True, text=True, timeout=20)
     return r.returncode == 0
@@ -231,6 +262,38 @@ def ensure_nginx():
     return False
 
 
+def _strip_legacy_cache(text):
+    """Remove any old cdn_cache zone definition we may have injected into
+    Baota's nginx.conf, including half-line fragments and multi-line
+    proxy_cache_path statements. Returns (new_text, removed)."""
+    lines = text.splitlines()
+    out = []
+    removed = False
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        is_zone = "keys_zone=cdn_cache" in ln
+        is_path = ("proxy_cache_path" in ln and "cdn_cache" in ln) or \
+                  ("proxy_temp_path" in ln and "cdn_cache" in ln)
+        if is_zone or is_path:
+            removed = True
+            # If the statement is multi-line, swallow lines until it terminates.
+            if ";" not in ln:
+                i += 1
+                while i < len(lines):
+                    if ";" in lines[i]:
+                        break
+                    i += 1
+            i += 1
+            continue
+        out.append(ln)
+        i += 1
+    new_text = "\n".join(out)
+    if text.endswith("\n"):
+        new_text += "\n"
+    return new_text, removed
+
+
 def ensure_cache_path():
     """Define the cdn_cache zone.
     System node: handled by the generated base config.
@@ -248,21 +311,17 @@ def ensure_cache_path():
     except Exception:
         pass
 
-    # Legacy cleanup: remove proxy_cache_path we previously injected into nginx.conf
+    # Legacy cleanup: remove any old cdn_cache definition we injected into nginx.conf
     nginx_conf = ENV.get("nginx_conf")
     if _exists(nginx_conf):
         try:
             txt = open(nginx_conf).read()
-            if "/www/server/nginx/cdn_cache" in txt and "keys_zone=cdn_cache" in txt:
-                kept = [ln for ln in txt.splitlines()
-                        if not ("/www/server/nginx/cdn_cache" in ln and "keys_zone=cdn_cache" in ln)]
-                new_txt = "\n".join(kept)
-                if txt.endswith("\n"):
-                    new_txt += "\n"
-                if new_txt != txt:
+            if "cdn_cache" in txt and ("keys_zone=cdn_cache" in txt or "proxy_cache_path" in txt):
+                new_txt, removed = _strip_legacy_cache(txt)
+                if removed and new_txt != txt:
                     with open(nginx_conf, "w") as f:
                         f.write(new_txt)
-                    log("removed legacy proxy_cache_path from Baota nginx.conf")
+                    log("removed legacy cdn_cache definition from Baota nginx.conf")
                     changed = True
         except Exception:
             pass
@@ -271,15 +330,17 @@ def ensure_cache_path():
         "# CDN cache zone — managed by cdn-agent, do not edit\n"
         f"proxy_cache_path {cache_dir} levels=1:2 keys_zone=cdn_cache:10m "
         "max_size=1g inactive=7d use_temp_path=off;\n"
-        f"proxy_temp_path {cache_dir}/tmp;\n"
     )
-    need = True
+    # Rewrite whenever content differs — this also strips a stale
+    # `proxy_temp_path` line (which duplicates Baota's own proxy.conf and makes
+    # `nginx -t` fail) from an older include file we previously wrote.
+    cur = ""
     if _exists(include):
         try:
-            need = "proxy_cache_path" not in open(include).read()
+            cur = open(include).read()
         except Exception:
-            need = True
-    if need:
+            cur = ""
+    if cur != content:
         try:
             os.makedirs(os.path.dirname(include), exist_ok=True)
             with open(include, "w") as f:
@@ -292,6 +353,36 @@ def ensure_cache_path():
 
 
 # ── Backup / rollback ─────────────────────────────────────────────
+
+def _managed_site_files(site_dir=None):
+    """Our site conf files only (Baota: cdn-*.conf; system: dedicated dir)."""
+    site_dir = site_dir or ENV["site_dir"]
+    out = []
+    if os.path.isdir(site_dir):
+        for f in os.listdir(site_dir):
+            p = os.path.join(site_dir, f)
+            if not os.path.isfile(p) or not f.endswith(".conf"):
+                continue
+            if ENV.get("is_baota") and not f.startswith("cdn-"):
+                continue
+            out.append(p)
+    return out
+
+
+def _managed_cert_dirs(ssl_dir=None):
+    """Our cert dirs only (system: whole dedicated dir; Baota: marked dirs)."""
+    ssl_dir = ssl_dir or ENV["ssl_dir"]
+    out = []
+    if os.path.isdir(ssl_dir):
+        for d in os.listdir(ssl_dir):
+            p = os.path.join(ssl_dir, d)
+            if not os.path.isdir(p):
+                continue
+            if ENV.get("is_baota") and not _exists(os.path.join(p, ".cdn-agent")):
+                continue
+            out.append(p)
+    return out
+
 
 def _backup_targets():
     targets = {"sites": ENV["site_dir"], "ssl": ENV["ssl_dir"]}
@@ -309,14 +400,19 @@ def backup_current():
     manifest = {}
     for key, src in _backup_targets().items():
         manifest[key] = src
-        if not _exists(src):
-            continue
         dst = os.path.join(bdir, key)
         try:
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src, dst)
+            if key == "nginx_conf":
+                if _exists(src):
+                    shutil.copy2(src, dst)
+            elif key == "sites":
+                os.makedirs(dst, exist_ok=True)
+                for p in _managed_site_files(src):
+                    shutil.copy2(p, os.path.join(dst, os.path.basename(p)))
+            elif key == "ssl":
+                os.makedirs(dst, exist_ok=True)
+                for p in _managed_cert_dirs(src):
+                    shutil.copytree(p, os.path.join(dst, os.path.basename(p)), dirs_exist_ok=True)
         except Exception as e:
             log(f"backup {key} failed: {e}")
     save_json(os.path.join(bdir, "manifest.json"), manifest)
@@ -333,18 +429,81 @@ def rollback(backup_path):
     manifest = load_json(os.path.join(backup_path, "manifest.json"), {})
     for key, src in manifest.items():
         bsrc = os.path.join(backup_path, key)
-        if not _exists(bsrc):
-            continue
         try:
             if key == "nginx_conf":
-                shutil.copy2(bsrc, src)
-            else:
-                if _exists(src):
-                    shutil.rmtree(src, ignore_errors=True)
-                shutil.copytree(bsrc, src, dirs_exist_ok=True)
+                if _exists(bsrc):
+                    shutil.copy2(bsrc, src)
+            elif key == "sites":
+                for p in _managed_site_files(src):
+                    os.remove(p)
+                if _exists(bsrc):
+                    os.makedirs(src, exist_ok=True)
+                    for f in os.listdir(bsrc):
+                        shutil.copy2(os.path.join(bsrc, f), os.path.join(src, f))
+            elif key == "ssl":
+                for p in _managed_cert_dirs(src):
+                    shutil.rmtree(p, ignore_errors=True)
+                if _exists(bsrc):
+                    os.makedirs(src, exist_ok=True)
+                    for d in os.listdir(bsrc):
+                        shutil.copytree(os.path.join(bsrc, d), os.path.join(src, d), dirs_exist_ok=True)
         except Exception as e:
             log(f"rollback {key} failed: {e}")
     nginx_reload()
+
+
+# ── Certificates: full re-upload ──────────────────────────────────
+
+def _sync_certs(certs):
+    """Certificates are all-or-nothing, so on any change we delete every
+    agent-managed cert dir and re-upload them fresh (no incremental merge).
+
+    Only directories we created (marked with `.cdn-agent`) are ever removed,
+    so Baota's own certificates are never touched."""
+    ssl_dir = ENV["ssl_dir"]
+    os.makedirs(ssl_dir, exist_ok=True)
+
+    desired = {}
+    for cert in certs:
+        domain = cert.get("domain", "")
+        if domain:
+            desired[domain] = (cert.get("fullchain_pem", ""), cert.get("privkey_pem", ""))
+
+    current = {}
+    for p in _managed_cert_dirs(ssl_dir):
+        d = os.path.basename(p)
+        try:
+            fc = open(os.path.join(p, "fullchain.pem")).read()
+            kp = open(os.path.join(p, "privkey.pem")).read()
+            current[d] = (fc, kp)
+        except Exception:
+            current[d] = None  # broken/incomplete -> force rewrite
+
+    if current == desired:
+        return False
+
+    # delete-all (only our managed dirs), then re-upload desired fresh
+    for d in list(current.keys()):
+        shutil.rmtree(os.path.join(ssl_dir, d), ignore_errors=True)
+    for domain, (fc, kp) in desired.items():
+        d = os.path.join(ssl_dir, domain)
+        os.makedirs(d, exist_ok=True)
+        try:
+            open(os.path.join(d, ".cdn-agent"), "w").close()
+        except Exception:
+            pass
+        with open(os.path.join(d, "fullchain.pem"), "w") as f:
+            f.write(fc)
+        with open(os.path.join(d, "privkey.pem"), "w") as f:
+            f.write(kp)
+        try:
+            os.chmod(os.path.join(d, "privkey.pem"), 0o600)
+            os.chmod(os.path.join(d, "fullchain.pem"), 0o644)
+        except Exception:
+            pass
+
+    log(f"  Certificates: full re-upload ({len(desired)} written, {len(current)} old removed)")
+    return True
 
 
 # ── Apply config ──────────────────────────────────────────────────
@@ -407,47 +566,8 @@ def apply_config(data):
             os.remove(os.path.join(site_dir, f))
             changed = True
 
-    existing_dirs = set()
-    ssl_dir = ENV["ssl_dir"]
-    for cert in certs:
-        domain = cert.get("domain", "")
-        if not domain:
-            continue
-        d = os.path.join(ssl_dir, domain)
-        existing_dirs.add(domain)
-        os.makedirs(d, exist_ok=True)
-        # marker so we only ever clean up directories we created
-        try:
-            marker = os.path.join(d, ".cdn-agent")
-            if not _exists(marker):
-                open(marker, "w").close()
-        except Exception:
-            pass
-
-        cp = os.path.join(d, "fullchain.pem")
-        kp = os.path.join(d, "privkey.pem")
-        cur_c = sha256(open(cp).read()) if _exists(cp) else ""
-        new_c = sha256(cert.get("fullchain_pem", ""))
-
-        if cur_c != new_c:
-            log(f"  Updating SSL: {domain}")
-            with open(cp, "w") as f:
-                f.write(cert["fullchain_pem"])
-            with open(kp, "w") as f:
-                f.write(cert["privkey_pem"])
-            os.chmod(kp, 0o600)
-            os.chmod(cp, 0o644)
-            changed = True
-
-    if os.path.isdir(ssl_dir):
-        for d in os.listdir(ssl_dir):
-            if d in existing_dirs:
-                continue
-            p = os.path.join(ssl_dir, d)
-            if os.path.isdir(p) and _exists(os.path.join(p, ".cdn-agent")):
-                log(f"  Removing stale SSL: {d}")
-                shutil.rmtree(p, ignore_errors=True)
-                changed = True
+    if _sync_certs(certs):
+        changed = True
 
     if not changed:
         return True
@@ -550,7 +670,8 @@ def _auth_headers(config):
 def _report_status(config, status):
     try:
         http_post_json(f"{config['manager_url']}/api/v1/node/status",
-                       {"status": status}, _auth_headers(config), timeout=5)
+                       {"status": status, "detected_type": ENV.get("detected_type", "")},
+                       _auth_headers(config), timeout=5)
     except Exception:
         pass
 
@@ -621,8 +742,10 @@ def register(args):
     token = args["token"]
 
     log(f"Registering: {url}")
+    detected = "baota" if detect_is_baota() else "auto"
     try:
-        st, body = http_post_json(f"{url}/api/v1/nodes/register", {"token": token})
+        st, body = http_post_json(f"{url}/api/v1/nodes/register",
+                                  {"token": token, "detected_type": detected})
     except Exception as e:
         log(f"Registration failed: {e}")
         sys.exit(1)
@@ -688,16 +811,32 @@ def check_self_update(config):
 
     try:
         st, body = http_get(f"{config['manager_url']}/api/v1/agent/download")
-        if st == 200 and body.strip().startswith("#!/") and sha256(body) != my_hash:
-            log("Agent update found, applying...")
-            with open(me + ".new", "w") as f:
-                f.write(body)
-            os.replace(me + ".new", me)
-            os.chmod(me, 0o755)
-            log("Agent updated, restarting...")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception:
-        pass
+        return
+    if st != 200:
+        return
+
+    # Validate before replacing: must look like our agent and be valid Python.
+    head = body.lstrip()[:200]
+    if not head.startswith("#!") or "def run(" not in body or "__main__" not in body:
+        log("Agent update rejected: content does not look like the agent (manager error page?)")
+        return
+    try:
+        compile(body, "cdn_agent.new", "exec")
+    except SyntaxError as e:
+        log(f"Agent update rejected: syntax error in downloaded agent ({e})")
+        return
+
+    if sha256(body) == my_hash:
+        return
+
+    log("Agent update found, applying...")
+    with open(me + ".new", "w") as f:
+        f.write(body)
+    os.replace(me + ".new", me)
+    os.chmod(me, 0o755)
+    log("Agent updated, restarting...")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 # ── Entrypoint ────────────────────────────────────────────────────

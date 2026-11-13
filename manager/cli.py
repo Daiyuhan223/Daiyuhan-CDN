@@ -22,6 +22,14 @@ def _is_private_ip(ip):
     return ip.startswith(("127.", "10.", "172.16.", "192.168.")) or ip.startswith("172.") and 16 <= int(ip.split(".")[1]) <= 31
 
 
+def _read_text_file(path):
+    if not os.path.exists(path):
+        print(f"ERROR: file not found: {path}")
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def _detect_manager_ip():
     if MANAGER_HOST not in ("0.0.0.0", "127.0.0.1", "::"):
         return MANAGER_HOST
@@ -133,6 +141,8 @@ def cmd_site_info(args):
         "redirect_url": site.redirect_url,
         "force_https": site.force_https,
         "certificate_id": site.certificate_id,
+        "custom_conf": site.custom_conf,
+        "custom_location_conf": site.custom_location_conf,
         "created_at": site.created_at,
         "nodes": [n.name for n in nodes],
     }, indent=2, ensure_ascii=False))
@@ -178,9 +188,25 @@ def cmd_site_update(args):
         else:
             site.certificate_id = None
         changed = True
+    if getattr(args, "custom_server_file", None):
+        txt = _read_text_file(args.custom_server_file)
+        if txt is None:
+            return
+        site.custom_conf = txt
+        changed = True
+    if getattr(args, "custom_location_file", None):
+        txt = _read_text_file(args.custom_location_file)
+        if txt is None:
+            return
+        site.custom_location_conf = txt
+        changed = True
+    if getattr(args, "clear_custom", False):
+        site.custom_conf = ""
+        site.custom_location_conf = ""
+        changed = True
 
     if not changed:
-        print("No changes specified. Use --origin / --ttl / --enable / --disable / --cache / --no-cache / --redirect / --no-redirect / --https / --no-https / --cert <id> / --no-cert")
+        print("No changes specified. Use --origin / --ttl / --enable / --disable / --cache / --no-cache / --redirect / --no-redirect / --https / --no-https / --cert <id> / --no-cert / --custom-server-file <f> / --custom-location-file <f> / --clear-custom")
         return
 
     db.update_site(site)
@@ -191,6 +217,7 @@ def cmd_site_update(args):
           f"cache={'Y' if site.cache_enabled else 'N'} "
           f"https={'Y' if site.force_https else 'N'} "
           f"cert={site.certificate_id if site.certificate_id else '-'} "
+          f"custom={'Y' if (site.custom_conf or site.custom_location_conf) else 'N'} "
           f"redirect={site.redirect_url or '-'}")
 
 
@@ -375,6 +402,107 @@ def cmd_ssl_import(args):
         print(f"  Saved to library only (bind later via site update --cert <id>)")
 
 
+def _pick_cert_file(files):
+    low = lambda f: f.lower()
+    cands = [f for f in files
+             if low(f).endswith((".pem", ".crt", ".cer"))
+             and not low(f).endswith(".key")
+             and "privkey" not in low(f) and "private" not in low(f)]
+    for word in ("fullchain", "chain", "cert"):
+        for f in cands:
+            if word in low(f):
+                return f
+    return cands[0] if cands else None
+
+
+def _pick_key_file(files):
+    for word in ("privkey", "private", "key"):
+        for f in files:
+            low = f.lower()
+            if word in low and low.endswith((".pem", ".key")) \
+               and "fullchain" not in low and "cert" not in low and "chain" not in low:
+                return f
+    for f in files:
+        if f.lower().endswith(".key") and "csr" not in f.lower():
+            return f
+    return None
+
+
+def _choose_primary_domain(domains):
+    ds = sorted(domains)
+    for d in ds:
+        if not d.startswith("*."):
+            return d
+    return ds[0] if ds else ""
+
+
+def cmd_ssl_sync_dir(args):
+    """Import/renew certs from a directory (e.g. AllinSSL deploy target) and
+    auto-bind them to matching unbound sites."""
+    root = args.dir
+    if not os.path.isdir(root):
+        print(f"ERROR: directory not found: {root}")
+        return
+
+    changed = False
+    imported = 0
+    bound = 0
+    skipped = 0
+    failed = 0
+
+    for dirpath, _dirnames, files in os.walk(root):
+        cf = _pick_cert_file(files)
+        kf = _pick_key_file(files)
+        if not cf or not kf:
+            continue
+        cpath = os.path.join(dirpath, cf)
+        kpath = os.path.join(dirpath, kf)
+        try:
+            pem = open(cpath, encoding="utf-8", errors="replace").read()
+            domains = ssl_mgr.cert_domains(pem)
+            primary = _choose_primary_domain(domains)
+            if not primary:
+                print(f"  SKIP (no domain in cert): {cpath}")
+                skipped += 1
+                continue
+
+            cert = ssl_mgr.import_cert(domain=primary, cert_path=cpath, key_path=kpath)
+            if not cert:
+                print(f"  SKIP (import/validation failed): {cpath}")
+                failed += 1
+                continue
+            cert.name = primary
+
+            existing = db.get_certificate_by_name(primary)
+            if existing and existing.fullchain_pem == cert.fullchain_pem \
+               and existing.privkey_pem == cert.privkey_pem:
+                cid = existing.id
+            else:
+                cert = db.save_certificate(cert)
+                cid = cert.id
+                changed = True
+                imported += 1
+                print(f"  imported: {primary}  [{cert.domains}]  expires {cert.expires_at}")
+
+            if not args.no_bind:
+                for site in db.list_sites():
+                    if site.certificate_id is None and ssl_mgr.domain_matches(site.domain, domains):
+                        site.certificate_id = cid
+                        db.update_site(site)
+                        changed = True
+                        bound += 1
+                        print(f"    bound site {site.domain} -> cert #{cid}")
+        except Exception as e:
+            failed += 1
+            print(f"  ERROR {dirpath}: {e}")
+
+    if changed:
+        db.bump_all_node_hashes()
+        print(f"Done: imported={imported} bound={bound} skipped={skipped} failed={failed}; node re-sync triggered")
+    else:
+        print(f"Done: no changes (skipped={skipped} failed={failed})")
+
+
 def cmd_cache_purge(args):
     site = db.get_site_by_domain(args.domain)
     if not site:
@@ -471,6 +599,9 @@ def main():
     cert_grp.add_argument("--cert", dest="cert", type=int, help="Certificate library ID to bind")
     cert_grp.add_argument("--no-cert", dest="cert", action="store_const", const=0, help="Unbind certificate")
     pu.set_defaults(cert=None)
+    pu.add_argument("--custom-server-file", default="", help="文件内容作为 server 级自定义 nginx 配置")
+    pu.add_argument("--custom-location-file", default="", help="文件内容作为 location / 级自定义 nginx 配置")
+    pu.add_argument("--clear-custom", action="store_true", help="清除自定义 nginx 配置")
     pu.set_defaults(func=cmd_site_update)
 
     # node
@@ -519,6 +650,10 @@ def main():
     pim.add_argument("--cert", default="", help="Fullchain certificate file path")
     pim.add_argument("--key", default="", help="Private key file path")
     pim.set_defaults(func=cmd_ssl_import)
+    psd = sp.add_parser("sync-dir", help="Scan a directory (e.g. AllinSSL deploy target) and import/bind certs")
+    psd.add_argument("--dir", "-D", dest="dir", required=True, help="Directory to scan recursively")
+    psd.add_argument("--no-bind", action="store_true", help="Do not auto-bind to unbound matching sites")
+    psd.set_defaults(func=cmd_ssl_sync_dir)
 
     # tokens
     p = sub.add_parser("tokens", help="List registration tokens")
