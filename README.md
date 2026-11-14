@@ -1,13 +1,13 @@
 # Daiyuhan-CDN
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
 - 项目主页：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 作者：Daiyuhan（https://github.com/Daiyuhan223）
-- 当前版本：v0.1.0
+- 当前版本：v0.1.1
 
 ---
 
@@ -353,7 +353,7 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 
 节点列表的"验证"列显示 🟢 已验证 / 🟡 待验证——节点成功应用配置并通过 `sync_token` 回传后变绿。
 
-导航栏显示当前版本，并提供 **「检查更新」** 按钮：会对比仓库 `VERSION` 文件，发现新版本时提示执行 `upgrade.sh` 升级（无外网时静默失败，不影响使用）。
+导航栏显示当前版本，并提供 **「检查更新」** 按钮：对比仓库 `VERSION`/`CHANGELOG.md`，有新版本时导航栏出现"有新版本 vX"徽标；点击弹出更新窗口（版本号 + 更新内容），提供 **「立即更新」**（服务端直接下载并升级，无需 SSH）与 **「忽略本次」**（该版本不再提示，出现更新版本时再提示）。无外网时静默失败，不影响使用。
 
 ---
 
@@ -531,13 +531,15 @@ Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 
 ## 无损升级
 
-**在线一键升级（推荐）**——自动拉取最新代码并升级，无需手动下载：
+**面板一键升级（最省事）**：Web 面板导航栏出现"有新版本"徽标 → 点开 →「立即更新」。服务端会用独立 systemd 临时单元执行升级（重启 Manager 也不会中断升级过程），完成后页面自动刷新。
+
+**命令行在线一键升级**——自动拉取最新代码并升级，无需手动下载：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
 
 # 升级到指定 tag / 分支
-curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.0.1
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.1.1
 ```
 
 **本地升级**——已有新版代码在服务器上时：
@@ -558,9 +560,10 @@ bash update.sh
 
 ## 开源信息
 
-- 项目：**Daiyuhan-CDN** v0.1.0
+- 项目：**Daiyuhan-CDN** v0.1.1
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
+- 版本规则：`0.1.x` 为增量更新（功能/修复），较大功能升级走 `0.2.0`（详见 [CHANGELOG.md](CHANGELOG.md)）
 
 ---
 

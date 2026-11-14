@@ -15,6 +15,7 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
 <nav class="navbar navbar-dark bg-dark px-3">
   <span class="navbar-brand">CDN Manager <small class="text-secondary" id="appVersion"></small></span>
   <div class="d-flex align-items-center gap-2 ms-auto">
+    <a href="#" id="updateBadge" class="badge bg-warning text-dark text-decoration-none" style="display:none" onclick="openUpdateModal(event)">有新版本 <span id="updateBadgeVer"></span></a>
     <button class="btn btn-sm btn-outline-light" onclick="checkUpdate(true)">检查更新</button>
     <span class="text-light small" id="managerStatus"></span>
   </div>
@@ -166,9 +167,22 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
 <div class="modal-footer"><button class="btn btn-secondary btn-sm" onclick="closeModal('modalCertImport')">取消</button><button class="btn btn-primary btn-sm" onclick="doCertImport()">导入</button></div>
 </div></div></div>
 
+<!-- Update Dialog -->
+<div class="modal" id="modalUpdate"><div class="modal-dialog"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">版本更新</h5><button class="btn-close" onclick="closeModal('modalUpdate')"></button></div>
+<div class="modal-body">
+  <p class="mb-2"><strong>当前版本：</strong><span id="updCurrent">-</span>　<strong>最新版本：</strong><span id="updLatest">-</span></p>
+  <pre class="bg-light p-2 rounded small mb-0" id="updNotes" style="white-space:pre-wrap;max-height:320px;overflow:auto">-</pre>
+</div>
+<div class="modal-footer">
+  <button class="btn btn-outline-secondary btn-sm" onclick="ignoreUpdate()">忽略本次</button>
+  <button class="btn btn-warning btn-sm" onclick="doUpgrade()">立即更新</button>
+</div>
+</div></div></div>
+
 <script>
 const API='/api/v1';
-let allSites=[], allNodes=[], allCerts=[], managerOk=false;
+let allSites=[], allNodes=[], allCerts=[], managerOk=false, updateInfo=null;
 
 // ── Toast / feedback ────────────────────
 function toast(msg, type, dur){type=type||'info';const colors={success:'#155724',danger:'#721c24',info:'#0c5460',warning:'#856404'};const bg={success:'#d4edda',danger:'#f8d7da',info:'#d1ecf1',warning:'#fff3cd'};const w=document.getElementById('toastWrap');const el=document.createElement('div');el.className='toast show align-items-center mb-2';el.style.background=bg[type]||bg.info;el.innerHTML=`<div class="d-flex"><div class="toast-body" style="color:${colors[type]}">${msg}</div><button type="button" class="btn-close me-2 m-auto" onclick="this.parentElement.parentElement.remove()"></button></div>`;w.appendChild(el);setTimeout(()=>el.remove(),dur||4000)}
@@ -179,7 +193,11 @@ document.querySelectorAll('#tabs .nav-link').forEach(el=>el.addEventListener('cl
 
 async function init(){await refreshAll();refreshStats();checkUpdate(false);setInterval(refreshAll,30000);setInterval(refreshStats,30000)}
 async function refreshAll(){try{const h=await fetch('/health');const d=await h.json();managerOk=d.status==='ok';const ve=document.getElementById('appVersion');if(ve&&d.version)ve.innerText='v'+d.version;document.getElementById('managerStatus').innerText=`Manager ${managerOk?'正常运行':'异常'} · ${d.sites||0} 站点 · ${d.nodes||0} 节点 · ${d.certs??'-'} 证书`}catch(e){managerOk=false;document.getElementById('managerStatus').innerText='Manager 离线'}refreshDash()}
-async function checkUpdate(force){try{const r=await fetch('/api/v1/update-check'+(force?'?force=1':''));const d=await r.json();const ve=document.getElementById('appVersion');if(ve&&d.current)ve.innerText='v'+d.current;if(d.update_available){toast(`发现新版本 ${d.latest}（当前 ${d.current}），执行 upgrade.sh 升级`,'warning',10000)}else if(force){toast(d.error?('检查更新失败：'+d.error):`已是最新版本 v${d.current}`,'success')}}catch(e){if(force)toast('检查更新失败','danger')}}
+async function checkUpdate(force){try{const r=await fetch('/api/v1/update-check'+(force?'?force=1':''));const d=await r.json();updateInfo=d;const ve=document.getElementById('appVersion');if(ve&&d.current)ve.innerText='v'+d.current;const ignored=localStorage.getItem('cdn_ignored_version')||'';const show=d.update_available&&d.latest!==ignored;const badge=document.getElementById('updateBadge');if(badge){badge.style.display=show?'':'none';const bv=document.getElementById('updateBadgeVer');if(bv)bv.innerText='v'+d.latest}if(force){if(d.update_available)openUpdateModal();else toast(d.error?('检查更新失败：'+d.error):`已是最新版本 v${d.current}`,'success')}}catch(e){if(force)toast('检查更新失败','danger')}}
+function openUpdateModal(e){if(e&&e.preventDefault)e.preventDefault();const d=updateInfo||{};document.getElementById('updCurrent').innerText='v'+(d.current||'?');document.getElementById('updLatest').innerText='v'+(d.latest||'?');document.getElementById('updNotes').innerText=d.notes||'（无更新说明）';const badge=document.getElementById('updateBadge');if(badge)badge.style.display='none';showModal('modalUpdate')}
+function ignoreUpdate(){if(updateInfo&&updateInfo.latest)localStorage.setItem('cdn_ignored_version',updateInfo.latest);const badge=document.getElementById('updateBadge');if(badge)badge.style.display='none';closeModal('modalUpdate');toast('已忽略本次更新','info')}
+async function doUpgrade(){if(!confirm('将在线升级到最新版本，服务会短暂重启（约几十秒），期间面板不可用。确定继续？'))return;closeModal('modalUpdate');try{await api('/system/upgrade',{method:'POST',body:{}});toast('升级已开始，服务将重启，请稍候…','warning',15000);pollUpgrade()}catch(e){toast(e.message,'danger')}}
+function pollUpgrade(){const v0=(updateInfo&&updateInfo.current)||'';let n=0;const t=setInterval(async()=>{n++;let d=null;try{const r=await fetch('/health');if(r.ok)d=await r.json()}catch(e){}if(d&&(!v0||d.version!==v0)){clearInterval(t);toast('升级完成：v'+d.version+'，即将刷新','success',8000);setTimeout(()=>location.reload(),1500);return}if(n>=100){clearInterval(t);toast('升级状态未知，请稍后手动刷新页面（日志 /var/log/cdn-upgrade.log）','warning',10000)}},3000)}
 
 // ── Dashboard ───────────────────────────
 async function refreshDash(){try{const n=(await api('/nodes')).nodes||[];allNodes=n;renderStats(n);renderNodeActivity(n)}catch(e){}}

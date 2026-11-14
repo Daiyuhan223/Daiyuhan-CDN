@@ -1,8 +1,12 @@
 import os
 import json
-import secrets
+import re
 import time
+import shutil
+import tempfile
+import secrets
 import threading
+import subprocess
 import urllib.request
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, Response, session, redirect
@@ -608,6 +612,34 @@ def _ver_tuple(v):
     return tuple(parts)
 
 
+def _fetch_text(url, timeout=5):
+    req = urllib.request.Request(url, headers={"User-Agent": "Daiyuhan-CDN"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _extract_changelog(text, version):
+    """Return the changelog section for `version` from a `## vX.Y.Z` markdown."""
+    want = (version or "").lstrip("vV").strip()
+    if not want:
+        return ""
+    out = []
+    capturing = False
+    for ln in text.splitlines():
+        m = re.match(r"^##\s+(.+)$", ln.strip())
+        if m:
+            head = m.group(1).strip().split()[0].lstrip("vV")
+            if head == want:
+                capturing = True
+                continue
+            if capturing:
+                break
+            continue
+        if capturing:
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
 @app.route("/api/v1/update-check", methods=["GET"])
 def update_check():
     force = request.args.get("force") in ("1", "true", "yes")
@@ -616,20 +648,28 @@ def update_check():
         return jsonify(_UPDATE_CACHE["data"])
 
     latest = ""
+    notes = ""
     error = ""
     try:
-        url = f"https://raw.githubusercontent.com/{_UPDATE_REPO}/main/VERSION"
-        req = urllib.request.Request(url, headers={"User-Agent": "Daiyuhan-CDN"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            latest = r.read().decode("utf-8", "replace").strip()
+        latest = _fetch_text(
+            f"https://raw.githubusercontent.com/{_UPDATE_REPO}/main/VERSION").strip()
     except Exception as e:
         error = str(e)
+
+    if latest:
+        try:
+            changelog = _fetch_text(
+                f"https://raw.githubusercontent.com/{_UPDATE_REPO}/main/CHANGELOG.md")
+            notes = _extract_changelog(changelog, latest)
+        except Exception:
+            notes = ""
 
     avail = bool(latest) and _ver_tuple(latest) > _ver_tuple(VERSION)
     data = {
         "current": VERSION,
         "latest": latest or VERSION,
         "update_available": avail,
+        "notes": notes,
         "repo": f"https://github.com/{_UPDATE_REPO}",
         "releases": f"https://github.com/{_UPDATE_REPO}/releases",
         "error": error,
@@ -637,6 +677,82 @@ def update_check():
     _UPDATE_CACHE["ts"] = now
     _UPDATE_CACHE["data"] = data
     return jsonify(data)
+
+
+@app.route("/api/v1/system/upgrade", methods=["POST"])
+def system_upgrade():
+    """Panel one-click upgrade: run upgrade.sh in a transient systemd unit so it
+    survives cdn-manager being stopped/restarted by the upgrade itself."""
+    if not session.get("logged_in"):
+        return jsonify({"error": "unauthorized"}), 401
+
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(base, "upgrade.sh")
+    if not os.path.exists(script):
+        return jsonify({"error": "upgrade.sh not found"}), 400
+
+    # Already running?
+    try:
+        if subprocess.run(["systemctl", "is-active", "--quiet", "cdn-upgrade"],
+                          capture_output=True).returncode == 0:
+            return jsonify({"error": "已有升级任务在进行中"}), 409
+    except Exception:
+        pass
+
+    log_file = "/var/log/cdn-upgrade.log"
+    tmp_script = os.path.join(tempfile.gettempdir(), f"cdn-upgrade-{int(time.time())}.sh")
+    try:
+        shutil.copy2(script, tmp_script)
+    except Exception as e:
+        return jsonify({"error": f"copy upgrade.sh failed: {e}"}), 500
+
+    inner = f"bash '{tmp_script}' >> '{log_file}' 2>&1; rm -f '{tmp_script}'"
+    try:
+        subprocess.run(["systemctl", "reset-failed", "cdn-upgrade"], capture_output=True)
+    except Exception:
+        pass
+
+    started = False
+    try:
+        r = subprocess.run(
+            ["systemd-run", "--unit", "cdn-upgrade", "--collect", "--no-block",
+             "/bin/bash", "-lc", inner],
+            capture_output=True, text=True, timeout=10)
+        started = (r.returncode == 0)
+        if not started:
+            app.logger.warning("systemd-run failed: %s", r.stderr)
+    except Exception as e:
+        app.logger.warning("systemd-run error: %s", e)
+
+    if not started:
+        # Fallback: detached process (best effort; may be killed if service
+        # stop uses cgroup kill — systemd-run is the reliable path).
+        try:
+            subprocess.Popen(["/bin/bash", "-lc", inner], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             close_fds=True)
+            started = True
+        except Exception as e:
+            return jsonify({"error": f"start upgrade failed: {e}"}), 500
+
+    return jsonify({"started": started, "current": VERSION, "log": log_file})
+
+
+@app.route("/api/v1/system/upgrade-log", methods=["GET"])
+def system_upgrade_log():
+    if not session.get("logged_in"):
+        return jsonify({"error": "unauthorized"}), 401
+    p = "/var/log/cdn-upgrade.log"
+    data = ""
+    try:
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 8192))
+            data = f.read().decode("utf-8", "replace")
+    except Exception:
+        data = ""
+    return jsonify({"log": data})
 
 
 # ═══════════════════════════════════════════════════════════════

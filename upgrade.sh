@@ -4,7 +4,7 @@
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
 #   bash upgrade.sh            # 默认拉取 main
-#   bash upgrade.sh v0.1.0     # 拉取指定 tag/分支
+#   bash upgrade.sh v0.1.1     # 拉取指定 tag/分支
 #
 # 说明：自动下载最新代码到临时目录后调用其中的 update.sh（备份/校验/回滚/重启一条龙），
 #       保留 data/ 数据库与面板配置。可用环境变量覆盖：
