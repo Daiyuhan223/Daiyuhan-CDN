@@ -8,6 +8,7 @@ import secrets
 import threading
 import subprocess
 import urllib.request
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, Response, session, redirect
 
@@ -309,6 +310,26 @@ def node_status(_node=None):
         db.update_node_config_hash(node.id, None)
         app.logger.warning("node %s type corrected to '%s', forcing re-sync", node.name, detected)
 
+    # Traffic: { "YYYY-MM-DD": { "host": bytes, ... }, ... } (absolute cumulative)
+    traffic = data.get("traffic")
+    if isinstance(traffic, dict):
+        n = 0
+        for day, hosts in traffic.items():
+            if not isinstance(hosts, dict):
+                continue
+            d = str(day)[:10]
+            for host, b in hosts.items():
+                if n >= 5000:
+                    break
+                try:
+                    nb = int(b)
+                except Exception:
+                    continue
+                if nb < 0:
+                    continue
+                db.upsert_traffic(node.id, d, str(host)[:253].lower(), nb)
+                n += 1
+
     db.update_node_status(node.id, status)
     return jsonify({"status": "updated", "node_type": node.node_type})
 
@@ -578,6 +599,84 @@ def download_agent():
         return jsonify({"error": "agent not found"}), 404
 
     return Response(content, mimetype="text/x-python")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Traffic summary
+# ═══════════════════════════════════════════════════════════════
+
+def _site_for_host(sites, host):
+    """Resolve a request host to a site (exact match wins, else longest wildcard)."""
+    host = (host or "").lower()
+    best = None
+    bestlen = -1
+    for s in sites:
+        d = (s.domain or "").lower()
+        if d == host:
+            return s
+        if d.startswith("*."):
+            suf = d[2:]
+            if suf and (host == suf or host.endswith("." + suf)) and len(suf) > bestlen:
+                best = s
+                bestlen = len(suf)
+    return best
+
+
+@app.route("/api/v1/traffic/summary", methods=["GET"])
+def traffic_summary():
+    rng = (request.args.get("range") or "month").lower()
+    today = datetime.now().date()
+
+    if rng == "day":
+        start = end = today
+    elif rng == "week":
+        start = today - timedelta(days=6)
+        end = today
+    elif rng == "total":
+        first = db.earliest_traffic_day()
+        try:
+            start = datetime.strptime(first, "%Y-%m-%d").date() if first else today
+        except Exception:
+            start = today
+        end = today
+    elif rng == "custom":
+        try:
+            start = datetime.strptime(request.args.get("start", ""), "%Y-%m-%d").date()
+            end = datetime.strptime(request.args.get("end", ""), "%Y-%m-%d").date()
+        except Exception:
+            start = today.replace(day=1)
+            end = today
+        if start > end:
+            start, end = end, start
+    else:
+        rng = "month"
+        start = today.replace(day=1)
+        end = today
+
+    hostmap = db.traffic_by_host(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    sites = db.list_active_sites()
+
+    totals = {}
+    unmatched = {}
+    for host, b in hostmap.items():
+        s = _site_for_host(sites, host)
+        if s:
+            totals[s.domain] = totals.get(s.domain, 0) + b
+        else:
+            unmatched[host] = unmatched.get(host, 0) + b
+
+    items = [{"domain": k, "bytes": v} for k, v in totals.items()]
+    items += [{"domain": h + "（未匹配站点）", "bytes": v} for h, v in unmatched.items()]
+    items.sort(key=lambda x: x["bytes"], reverse=True)
+    total = sum(i["bytes"] for i in items)
+
+    return jsonify({
+        "range": rng,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "total": total,
+        "items": items,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════

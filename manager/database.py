@@ -73,6 +73,16 @@ CREATE TABLE IF NOT EXISTS registration_tokens (
     used INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS traffic_daily (
+    day TEXT NOT NULL,
+    node_id INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, node_id, host)
+);
+
+CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_daily(day);
 """
 
 
@@ -521,6 +531,29 @@ class Database:
     def delete_registration_token(self, token_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM registration_tokens WHERE id=?", (token_id,))
+
+    # ── Traffic ──────────────────────────────────────────────────
+
+    def upsert_traffic(self, node_id: int, day: str, host: str, nbytes: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO traffic_daily (day, node_id, host, bytes) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(day, node_id, host) DO UPDATE SET bytes=MAX(bytes, excluded.bytes)""",
+                (day, node_id, host, int(nbytes))
+            )
+
+    def traffic_by_host(self, start_day: str, end_day: str):
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT host, SUM(bytes) AS b FROM traffic_daily WHERE day>=? AND day<=? GROUP BY host",
+                (start_day, end_day)
+            ).fetchall()
+            return {r["host"]: int(r["b"] or 0) for r in rows}
+
+    def earliest_traffic_day(self):
+        with self._get_conn() as conn:
+            r = conn.execute("SELECT MIN(day) AS d FROM traffic_daily").fetchone()
+            return r["d"] if r and r["d"] else None
 
     # ── Utility ──────────────────────────────────────────────────
 

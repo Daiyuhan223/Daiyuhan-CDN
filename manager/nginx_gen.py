@@ -33,6 +33,12 @@ def _ssl_root(node: Node) -> str:
     return BAOTA_SSL_DIR if node.node_type == "baota" else AGENT_SSL_DIR
 
 
+def _traffic_log(node: Node) -> str:
+    """Dedicated access log for traffic accounting (has host/bytes/ts fields)."""
+    return ("/www/server/nginx/logs/cdn_access.log" if node.node_type == "baota"
+            else "/var/log/nginx/cdn_access.log")
+
+
 def generate_nginx_base() -> str:
     tmpl = _load_template("nginx_base.conf.j2")
     return tmpl.render(
@@ -59,6 +65,7 @@ def generate_site_config(site: Site, node: Node, manager_ip: str = "",
         force_https=site.force_https,
         custom_conf=site.custom_conf,
         custom_location_conf=site.custom_location_conf,
+        traffic_log=_traffic_log(node),
         ssl_cert=ssl_cert_path,
         ssl_key=ssl_key_path,
         node_name=node.name,
@@ -77,6 +84,7 @@ def _render_redirect(site: Site, node: Node, ssl_cert_path: str, ssl_key_path: s
         ssl_enabled=site.ssl_enabled,
         force_https=site.force_https,
         custom_conf=site.custom_conf,
+        traffic_log=_traffic_log(node),
         ssl_cert=ssl_cert_path,
         ssl_key=ssl_key_path,
     )

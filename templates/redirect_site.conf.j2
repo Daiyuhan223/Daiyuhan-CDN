@@ -3,6 +3,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name {{ domain }};
+    access_log {{ traffic_log }} cdn_traffic;
 
 {% if force_https %}
     if ($scheme = http) {

@@ -10,6 +10,7 @@ Design goals:
 
 import os
 import sys
+import re
 import json
 import time
 import shutil
@@ -19,7 +20,7 @@ import ssl
 import urllib.request
 import urllib.error
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 CONF_DIR = "/opt/cdn-agent"
 CONFIG_FILE = f"{CONF_DIR}/agent.json"
@@ -109,6 +110,7 @@ def resolve_env(config):
             "ssl_dir": BAOTA_SSL_DIR,
             "cache_dir": BAOTA_CACHE_DIR,
             "log_dir": BAOTA_LOG_DIR,
+            "traffic_log": f"{BAOTA_ROOT}/logs/cdn_access.log",
             "cache_include": BAOTA_CACHE_INCLUDE,
         }
     else:
@@ -121,6 +123,7 @@ def resolve_env(config):
             "ssl_dir": "/etc/nginx/ssl",
             "cache_dir": "/var/cache/nginx/cdn_cache",
             "log_dir": "/var/log/nginx",
+            "traffic_log": "/var/log/nginx/cdn_access.log",
             "cache_include": "",
         }
     log(f"Environment: {'Baota' if is_baota else 'system'} nginx "
@@ -327,9 +330,14 @@ def ensure_cache_path():
             pass
 
     content = (
-        "# CDN cache zone — managed by cdn-agent, do not edit\n"
+        "# CDN cache zone + traffic log format — managed by cdn-agent, do not edit\n"
         f"proxy_cache_path {cache_dir} levels=1:2 keys_zone=cdn_cache:10m "
         "max_size=1g inactive=7d use_temp_path=off;\n"
+        "log_format cdn_traffic '$remote_addr - $remote_user [$time_local] "
+        "\"$request\" $status $body_bytes_sent \"$http_referer\" \"$http_user_agent\" "
+        "cache=$upstream_cache_status rt=$request_time uct=$upstream_connect_time "
+        "uht=$upstream_header_time urt=$upstream_response_time "
+        "host=$host bytes=$body_bytes_sent ts=$time_iso8601';\n"
     )
     # Rewrite whenever content differs — this also strips a stale
     # `proxy_temp_path` line (which duplicates Baota's own proxy.conf and makes
@@ -661,17 +669,107 @@ def maintenance():
         _cleanup_disk()
 
 
+# ── Traffic accounting (from access.log) ─────────────────────────
+
+TRAFFIC_MAX_READ = 16 * 1024 * 1024
+TRAFFIC_KEEP_DAYS = 70
+TRAFFIC_AGG_INTERVAL = 180
+
+_HOST_RE = re.compile(r"\bhost=(\S+)")
+_BYTES_RE = re.compile(r"\bbytes=(\d+)")
+_TS_RE = re.compile(r"\bts=(\d{4}-\d{2}-\d{2})")
+
+
+def _aggregate_traffic(state):
+    """Incrementally parse access.log and accumulate per day/per host bytes."""
+    logp = ENV.get("traffic_log") or ""
+    if not logp or not _exists(logp):
+        return False
+
+    tr = state.get("traffic")
+    if not isinstance(tr, dict):
+        tr = {"inode": 0, "offset": 0, "days": {}}
+        state["traffic"] = tr
+    tr.setdefault("days", {})
+
+    try:
+        st = os.stat(logp)
+    except Exception:
+        return False
+
+    if tr.get("inode") != st.st_ino or st.st_size < tr.get("offset", 0):
+        tr["inode"] = st.st_ino
+        tr["offset"] = 0
+
+    offset = tr.get("offset", 0)
+    if st.st_size <= offset:
+        return False
+
+    try:
+        with open(logp, "rb") as f:
+            f.seek(offset)
+            chunk = f.read(TRAFFIC_MAX_READ)
+    except Exception:
+        return False
+
+    nl = chunk.rfind(b"\n")
+    if nl < 0:
+        return False
+    usable = chunk[:nl + 1]
+    tr["offset"] = offset + len(usable)
+
+    days = tr["days"]
+    for raw in usable.split(b"\n"):
+        if not raw:
+            continue
+        line = raw.decode("utf-8", "replace")
+        mh = _HOST_RE.search(line)
+        mb = _BYTES_RE.search(line)
+        mt = _TS_RE.search(line)
+        if not (mh and mb and mt):
+            continue
+        try:
+            nb = int(mb.group(1))
+        except Exception:
+            continue
+        host = mh.group(1).lower()
+        day = mt.group(1)
+        d = days.setdefault(day, {})
+        d[host] = d.get(host, 0) + nb
+
+    cutoff = (datetime.now() - timedelta(days=TRAFFIC_KEEP_DAYS)).strftime("%Y-%m-%d")
+    for d in [k for k in list(days.keys()) if k < cutoff]:
+        days.pop(d, None)
+    return True
+
+
+def _recent_traffic(state, n=3):
+    tr = state.get("traffic") or {}
+    days = tr.get("days") or {}
+    if not days:
+        return None
+    out = {}
+    today = datetime.now().date()
+    for i in range(n):
+        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        if d in days:
+            out[d] = days[d]
+    return out or None
+
+
 # ── Sync with Manager ─────────────────────────────────────────────
 
 def _auth_headers(config):
     return {"Authorization": f"Bearer {config['api_key']}"}
 
 
-def _report_status(config, status):
+def _report_status(config, status, traffic=None):
     try:
+        payload = {"status": status, "detected_type": ENV.get("detected_type", "")}
+        if traffic:
+            payload["traffic"] = traffic
         http_post_json(f"{config['manager_url']}/api/v1/node/status",
-                       {"status": status, "detected_type": ENV.get("detected_type", "")},
-                       _auth_headers(config), timeout=5)
+                       payload, _auth_headers(config), timeout=8)
     except Exception:
         pass
 
@@ -697,8 +795,15 @@ def sync(config):
         log("Sync: invalid JSON from manager")
         return
 
-    # Health-aware heartbeat
-    _report_status(config, "online" if nginx_running() else "nginx_down")
+    # Traffic accounting (throttled) + health-aware heartbeat
+    now_ts = time.time()
+    tr = state.get("traffic")
+    if not isinstance(tr, dict) or now_ts - tr.get("agg_at", 0) > TRAFFIC_AGG_INTERVAL:
+        _aggregate_traffic(state)
+        state.setdefault("traffic", {})["agg_at"] = now_ts
+        save_json(STATE_FILE, state)
+    _report_status(config, "online" if nginx_running() else "nginx_down",
+                   _recent_traffic(state))
 
     if data.get("action") == "none":
         if state.get("_hb", 0) % 20 == 0:

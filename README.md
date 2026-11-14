@@ -1,13 +1,13 @@
 # Daiyuhan-CDN
 
-[![Version](https://img.shields.io/badge/version-v0.1.2-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
+[![Version](https://img.shields.io/badge/version-v0.2.0-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
 - 项目主页：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 作者：Daiyuhan（https://github.com/Daiyuhan223）
-- 当前版本：v0.1.2
+- 当前版本：v0.2.0
 
 ---
 
@@ -346,7 +346,7 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 
 | 页面 | 功能 |
 |------|------|
-| 仪表盘 | 站点/节点/证书数量统计 + Manager 状态 + 节点验证状态 |
+| 仪表盘 | 站点/节点/证书数量统计 + 节点验证状态 + **流量排行**（日/周/月/总 + 自定义时间段，按站点聚合） |
 | 站点管理 | 添加/编辑/删除站点，搜索过滤 |
 | 节点管理 | 添加/删除节点（auto/baota），一键生成安装命令，验证状态 |
 | SSL 证书 | 签发/导入（目录/文件/粘贴内容）/续期，到期提醒 |
@@ -354,6 +354,8 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 节点列表的"验证"列显示 🟢 已验证 / 🟡 待验证——节点成功应用配置并通过 `sync_token` 回传后变绿。
 
 导航栏显示当前版本，并提供 **「检查更新」** 按钮：对比仓库 `VERSION`/`CHANGELOG.md`，有新版本时导航栏出现"有新版本 vX"徽标；点击弹出更新窗口（版本号 + 更新内容），提供 **「立即更新」**（服务端直接下载并升级，无需 SSH）与 **「忽略本次」**（该版本不再提示，出现更新版本时再提示）。无外网时静默失败，不影响使用。
+
+**流量统计**：仪表盘「流量排行」按站点汇总**出站流量**（基于 nginx `access.log` 的 `$body_bytes_sent`），支持日/周/月/总与自定义时间段，显示占比。各边缘节点增量解析日志（按日期 + host 累加），随心跳上报绝对累计值；Manager 存 `traffic_daily`，跨节点求和，通配符站点按 host 归并。日志格式新增 `host/bytes/ts` 字段，升级后节点重新拉取配置才开始统计（无历史数据）。
 
 ---
 
@@ -371,6 +373,7 @@ python3 manager/cli.py tokens                  # 查看注册 Token
 | 空间清理 | 磁盘高水位时清理 nginx 日志 / journald / apt 临时文件 / 旧备份 |
 | 自更新 | 每小时从 Manager 检查自身版本，不同则自动替换并重启 |
 | 站点配置增量 | 站点 conf 按内容哈希只更新变更的文件 |
+| 流量统计 | 增量解析 `cdn_access.log`（host/bytes/ts），按日/每 host 累加，随心跳上报绝对累计值 |
 | 环境诊断 | `cdn_agent.py --diag` 打印探测到的环境与路径 |
 
 ---
@@ -539,7 +542,7 @@ Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
 
 # 升级到指定 tag / 分支
-curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.1.2
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.2.0
 ```
 
 **本地升级**——已有新版代码在服务器上时：
@@ -559,7 +562,7 @@ bash update.sh
 
 ## 开源信息
 
-- 项目：**Daiyuhan-CDN** v0.1.2
+- 项目：**Daiyuhan-CDN** v0.2.0
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 版本规则：`0.1.x` 为增量更新（功能/修复），较大功能升级走 `0.2.0`（详见 [CHANGELOG.md](CHANGELOG.md)）
