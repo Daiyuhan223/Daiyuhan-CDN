@@ -529,6 +529,9 @@ def apply_config(data):
         os.makedirs(ENV["cache_dir"], exist_ok=True)
         if not ENV.get("is_baota"):
             os.makedirs("/var/cache/nginx/tmp", exist_ok=True)
+        tl = ENV.get("traffic_log")
+        if tl:
+            os.makedirs(os.path.dirname(tl), exist_ok=True)
     except Exception:
         pass
 
@@ -816,7 +819,9 @@ def sync(config):
     ok = apply_config(data)
     if not ok:
         log("Config apply FAILED (nginx not active or test failed)")
-        _report_status(config, "nginx_down")
+        # After a rollback nginx may still be running the last good config.
+        _report_status(config, "online" if nginx_running() else "nginx_down",
+                       _recent_traffic(state))
         return
 
     state["hash"] = data.get("config_hash", "")
