@@ -1,13 +1,13 @@
-﻿# Daiyuhan-CDN
+# Daiyuhan-CDN
 
-[![Version](https://img.shields.io/badge/version-v0.0.1-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
 - 项目主页：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 作者：Daiyuhan（https://github.com/Daiyuhan223）
-- 当前版本：v0.0.1
+- 当前版本：v0.1.0
 
 ---
 
@@ -558,7 +558,7 @@ bash update.sh
 
 ## 开源信息
 
-- 项目：**Daiyuhan-CDN** v0.0.1
+- 项目：**Daiyuhan-CDN** v0.1.0
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
 
