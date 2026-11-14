@@ -777,6 +777,31 @@ def _report_status(config, status, traffic=None):
         pass
 
 
+def _maybe_verify(config, data, state):
+    """Verify config sync with the Manager; safe to call on every poll so a
+    token race (e.g. concurrent syncs) can heal on the next cycle."""
+    token = data.get("sync_token", "")
+    if not token or state.get("verified_token") == token:
+        return
+    if not nginx_running():
+        return
+    try:
+        st, b = http_post_json(f"{config['manager_url']}/api/v1/node/verify",
+                               {"sync_token": token}, _auth_headers(config), timeout=8)
+        try:
+            verified = json.loads(b).get("verified")
+        except Exception:
+            verified = False
+        if verified:
+            state["verified_token"] = token
+            save_json(STATE_FILE, state)
+            log("Sync verified by manager")
+        else:
+            log("Sync verify FAILED")
+    except Exception as e:
+        log(f"Sync verify error: {e}")
+
+
 def sync(config):
     state = load_json(STATE_FILE)
     url = f"{config['manager_url']}/api/v1/node/sync"
@@ -813,6 +838,7 @@ def sync(config):
             log("Poll OK, no changes")
         state["_hb"] = state.get("_hb", 0) + 1
         save_json(STATE_FILE, state)
+        _maybe_verify(config, data, state)
         return
 
     log(f"Config update: {len(data.get('sites', []))} sites, {len(data.get('certs', []))} certs")
@@ -828,23 +854,11 @@ def sync(config):
     state["last_sync"] = datetime.now().isoformat()
     save_json(STATE_FILE, state)
 
-    token = data.get("sync_token", "")
-    if not token:
-        return
     if not nginx_running():
         log("nginx not running after apply, skip verify")
         _report_status(config, "nginx_down")
         return
-    try:
-        st, b = http_post_json(f"{config['manager_url']}/api/v1/node/verify",
-                               {"sync_token": token}, h, timeout=8)
-        try:
-            verified = json.loads(b).get("verified")
-        except Exception:
-            verified = False
-        log("Sync verified by manager" if verified else "Sync verify FAILED")
-    except Exception as e:
-        log(f"Sync verify error: {e}")
+    _maybe_verify(config, data, state)
 
 
 def register(args):

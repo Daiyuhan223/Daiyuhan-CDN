@@ -272,7 +272,8 @@ def node_sync(_node=None):
 
     if client_hash == current_hash and current_hash:
         db.update_node_status(node.id, "online", current_hash)
-        return jsonify({"action": "none", "config_hash": current_hash, "message": "up to date"})
+        return jsonify({"action": "none", "config_hash": current_hash,
+                        "sync_token": node.sync_token, "message": "up to date"})
 
     sites = db.get_node_sites(node.id)
     ssl_certs_map = {}

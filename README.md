@@ -1,13 +1,13 @@
 # Daiyuhan-CDN
 
-[![Version](https://img.shields.io/badge/version-v0.2.0-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
+[![Version](https://img.shields.io/badge/version-v0.2.1-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
 - 项目主页：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 作者：Daiyuhan（https://github.com/Daiyuhan223）
-- 当前版本：v0.2.0
+- 当前版本：v0.2.1
 
 ---
 
@@ -542,7 +542,7 @@ Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
 
 # 升级到指定 tag / 分支
-curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.2.0
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.2.1
 ```
 
 **本地升级**——已有新版代码在服务器上时：
@@ -562,7 +562,7 @@ bash update.sh
 
 ## 开源信息
 
-- 项目：**Daiyuhan-CDN** v0.2.0
+- 项目：**Daiyuhan-CDN** v0.2.1
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 版本规则：`0.1.x` 为增量更新（功能/修复），较大功能升级走 `0.2.0`（详见 [CHANGELOG.md](CHANGELOG.md)）
