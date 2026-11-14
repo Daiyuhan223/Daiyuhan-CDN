@@ -8,6 +8,7 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
 <style>
 body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}.nav-tabs .nav-link{border:none;color:#666;padding:10px 20px;border-radius:8px 8px 0 0}.nav-tabs .nav-link.active{color:#4361ee;border-bottom:3px solid #4361ee;font-weight:600;background:transparent}.stat-card{display:flex;align-items:center;gap:14px}.stat-icon{font-size:36px}.stat-value{font-size:26px;font-weight:700}.stat-label{font-size:13px;color:#888}.table>thead{background:#f8f9fa}.btn-sm{padding:4px 10px;font-size:12px}.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}.tag-success{background:#d4edda;color:#155724}.tag-danger{background:#f8d7da;color:#721c24}.tag-warning{background:#fff3cd;color:#856404}.tag-info{background:#d1ecf1;color:#0c5460}.tag-secondary{background:#e2e3e5;color:#383d41}.modal{display:none}.modal.show{display:block;background:rgba(0,0,0,.4)}.search-box{max-width:300px}.toast-wrap{position:fixed;top:60px;right:16px;z-index:2000}.cell-max{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.update-badge{animation:cdnPulse 1.8s ease-in-out infinite;cursor:pointer;font-size:13px;padding:.45em .8em}@keyframes cdnPulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,193,7,.7)}50%{transform:scale(1.1);box-shadow:0 0 0 7px rgba(255,193,7,0)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,193,7,0)}}
+.upd-modal{border-radius:16px;overflow:hidden}.upd-vers{display:flex;align-items:center;justify-content:center;gap:18px;padding:14px;background:#f8f9fa;border-radius:12px}.upd-ver-box{text-align:center;min-width:110px;padding:8px 14px;border-radius:10px;background:#fff;border:1px solid #e9ecef}.upd-ver-label{font-size:12px;color:#adb5bd}.upd-ver-num{font-size:20px;font-weight:700;color:#495057}.upd-ver-new{background:#fff8e1;border-color:#ffe08a}.upd-ver-new .upd-ver-num{color:#b8860b}.upd-notes{background:#fffdf5;border:1px solid #ffe8a3;border-radius:12px;padding:12px 16px;font-size:13px;line-height:1.7;max-height:300px;overflow:auto}.upd-notes ul{margin:0;padding-left:18px}.upd-notes li{margin:2px 0}
 </style>
 </head>
 <body>
@@ -168,15 +169,33 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
 </div></div></div>
 
 <!-- Update Dialog -->
-<div class="modal" id="modalUpdate"><div class="modal-dialog"><div class="modal-content">
-<div class="modal-header"><h5 class="modal-title">版本更新</h5><button class="btn-close" onclick="closeModal('modalUpdate')"></button></div>
-<div class="modal-body">
-  <p class="mb-2"><strong>当前版本：</strong><span id="updCurrent">-</span>　<strong>最新版本：</strong><span id="updLatest">-</span></p>
-  <pre class="bg-light p-2 rounded small mb-0" id="updNotes" style="white-space:pre-wrap;max-height:320px;overflow:auto">-</pre>
+<div class="modal" id="modalUpdate"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content border-0 shadow-lg upd-modal">
+<div class="modal-header border-0 pb-0">
+  <div class="d-flex align-items-center gap-2">
+    <i class="bi bi-arrow-up-circle-fill text-warning fs-3"></i>
+    <div>
+      <h5 class="modal-title mb-0">发现新版本</h5>
+      <div class="small text-muted">升级后自动应用，服务会短暂重启</div>
+    </div>
+  </div>
+  <button class="btn-close" onclick="closeModal('modalUpdate')"></button>
 </div>
-<div class="modal-footer">
-  <button class="btn btn-outline-secondary btn-sm" onclick="ignoreUpdate()">忽略本次</button>
-  <button class="btn btn-warning btn-sm" onclick="doUpgrade()">立即更新</button>
+<div class="modal-body">
+  <div class="upd-vers mb-3">
+    <div class="upd-ver-box"><div class="upd-ver-label">当前</div><div class="upd-ver-num" id="updCurrent">-</div></div>
+    <i class="bi bi-arrow-right text-muted"></i>
+    <div class="upd-ver-box upd-ver-new"><div class="upd-ver-label">最新</div><div class="upd-ver-num" id="updLatest">-</div></div>
+  </div>
+  <div class="fw-semibold small text-muted mb-2"><i class="bi bi-list-check"></i> 更新内容</div>
+  <div class="upd-notes" id="updNotes">-</div>
+  <div id="updProgress" class="mt-3" style="display:none">
+    <div class="progress" style="height:8px"><div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div></div>
+    <div class="small text-muted mt-2" id="updProgressText">正在升级，请稍候…</div>
+  </div>
+</div>
+<div class="modal-footer border-0">
+  <button class="btn btn-outline-secondary btn-sm" id="btnIgnoreUpdate" onclick="ignoreUpdate()">忽略本次</button>
+  <button class="btn btn-warning btn-sm px-3" id="btnDoUpgrade" onclick="doUpgrade()"><i class="bi bi-lightning-charge-fill"></i> 立即更新</button>
 </div>
 </div></div></div>
 
@@ -194,10 +213,11 @@ document.querySelectorAll('#tabs .nav-link').forEach(el=>el.addEventListener('cl
 async function init(){await refreshAll();refreshStats();checkUpdate(false);setInterval(refreshAll,30000);setInterval(refreshStats,30000)}
 async function refreshAll(){try{const h=await fetch('/health');const d=await h.json();managerOk=d.status==='ok';const ve=document.getElementById('appVersion');if(ve&&d.version)ve.innerText='v'+d.version;document.getElementById('managerStatus').innerText=`Manager ${managerOk?'正常运行':'异常'} · ${d.sites||0} 站点 · ${d.nodes||0} 节点 · ${d.certs??'-'} 证书`}catch(e){managerOk=false;document.getElementById('managerStatus').innerText='Manager 离线'}refreshDash()}
 async function checkUpdate(force){try{const r=await fetch('/api/v1/update-check'+(force?'?force=1':''));const d=await r.json();updateInfo=d;const ve=document.getElementById('appVersion');if(ve&&d.current)ve.innerText='v'+d.current;const ignored=localStorage.getItem('cdn_ignored_version')||'';const show=d.update_available&&d.latest!==ignored;const badge=document.getElementById('updateBadge');if(badge){badge.style.display=show?'':'none';const bv=document.getElementById('updateBadgeVer');if(bv)bv.innerText='v'+d.latest}if(!force&&show){const pk='cdn_update_popped_'+(d.latest||'');if(!sessionStorage.getItem(pk)){sessionStorage.setItem(pk,'1');openUpdateModal()}}if(force){if(d.update_available)openUpdateModal();else toast(d.error?('检查更新失败：'+d.error):`已是最新版本 v${d.current}`,'success')}}catch(e){if(force)toast('检查更新失败','danger')}}
-function openUpdateModal(e){if(e&&e.preventDefault)e.preventDefault();const d=updateInfo||{};document.getElementById('updCurrent').innerText='v'+(d.current||'?');document.getElementById('updLatest').innerText='v'+(d.latest||'?');document.getElementById('updNotes').innerText=d.notes||'（无更新说明）';const badge=document.getElementById('updateBadge');if(badge)badge.style.display='none';showModal('modalUpdate')}
+function renderNotes(text){if(!text)return '<span class="text-muted">（无更新说明）</span>';const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));let html='',inList=false;const closeList=()=>{if(inList){html+='</ul>';inList=false}};for(const ln of (text||'').split('\n')){const t=ln.trim();if(t.startsWith('- ')){if(!inList){html+='<ul>';inList=true}html+='<li>'+esc(t.slice(2))+'</li>'}else{if(!t)continue;closeList();html+='<div>'+esc(t)+'</div>'}}closeList();return html||'<span class="text-muted">（无更新说明）</span>'}
+function openUpdateModal(e){if(e&&e.preventDefault)e.preventDefault();const d=updateInfo||{};document.getElementById('updCurrent').innerText=d.current?'v'+d.current:'?';document.getElementById('updLatest').innerText=d.latest?'v'+d.latest:'?';document.getElementById('updNotes').innerHTML=renderNotes(d.notes);const pr=document.getElementById('updProgress');if(pr)pr.style.display='none';const b=document.getElementById('btnDoUpgrade');if(b){b.disabled=false;b.innerHTML='<i class="bi bi-lightning-charge-fill"></i> 立即更新'};const ig=document.getElementById('btnIgnoreUpdate');if(ig)ig.disabled=false;const badge=document.getElementById('updateBadge');if(badge)badge.style.display='none';showModal('modalUpdate')}
 function ignoreUpdate(){if(updateInfo&&updateInfo.latest)localStorage.setItem('cdn_ignored_version',updateInfo.latest);const badge=document.getElementById('updateBadge');if(badge)badge.style.display='none';closeModal('modalUpdate');toast('已忽略本次更新','info')}
-async function doUpgrade(){if(!confirm('将在线升级到最新版本，服务会短暂重启（约几十秒），期间面板不可用。确定继续？'))return;closeModal('modalUpdate');try{await api('/system/upgrade',{method:'POST',body:{}});toast('升级已开始，服务将重启，请稍候…','warning',15000);pollUpgrade()}catch(e){toast(e.message,'danger')}}
-function pollUpgrade(){const v0=(updateInfo&&updateInfo.current)||'';let n=0;const t=setInterval(async()=>{n++;let d=null;try{const r=await fetch('/health');if(r.ok)d=await r.json()}catch(e){}if(d&&(!v0||d.version!==v0)){clearInterval(t);toast('升级完成：v'+d.version+'，即将刷新','success',8000);setTimeout(()=>location.reload(),1500);return}if(n>=100){clearInterval(t);toast('升级状态未知，请稍后手动刷新页面（日志 /var/log/cdn-upgrade.log）','warning',10000)}},3000)}
+async function doUpgrade(){const b=document.getElementById('btnDoUpgrade'),ig=document.getElementById('btnIgnoreUpdate'),pr=document.getElementById('updProgress'),pt=document.getElementById('updProgressText');if(b){b.disabled=true;b.innerHTML='<span class="spinner-border spinner-border-sm"></span> 升级中'};if(ig)ig.disabled=true;if(pr)pr.style.display='';if(pt)pt.innerText='正在下载并升级，服务即将重启…';try{await api('/system/upgrade',{method:'POST',body:{}});pollUpgrade()}catch(e){if(pt)pt.innerText='升级启动失败：'+e.message;if(b){b.disabled=false;b.innerHTML='<i class="bi bi-lightning-charge-fill"></i> 重试'};if(ig)ig.disabled=false;toast(e.message,'danger')}}
+function pollUpgrade(){const v0=(updateInfo&&updateInfo.current)||'';let n=0;const pt=document.getElementById('updProgressText');const t=setInterval(async()=>{n++;let d=null;try{const r=await fetch('/health');if(r.ok)d=await r.json()}catch(e){}if(d&&(!v0||d.version!==v0)){clearInterval(t);if(pt)pt.innerText='升级完成：v'+d.version+'，正在刷新…';toast('升级完成：v'+d.version,'success',5000);setTimeout(()=>location.reload(),1500);return}if(pt)pt.innerText='升级进行中… 已等待 '+(n*3)+'s';if(n>=100){clearInterval(t);if(pt)pt.innerText='状态未知，请稍后手动刷新（日志 /var/log/cdn-upgrade.log）'}},3000)}
 
 // ── Dashboard ───────────────────────────
 async function refreshDash(){try{const n=(await api('/nodes')).nodes||[];allNodes=n;renderStats(n);renderNodeActivity(n)}catch(e){}}
