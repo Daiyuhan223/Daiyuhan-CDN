@@ -1,13 +1,13 @@
 # Daiyuhan-CDN
 
-[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.2-blue.svg)](https://github.com/Daiyuhan223/Daiyuhan-CDN/releases)
 [![Author](https://img.shields.io/badge/author-Daiyuhan-4361ee.svg)](https://github.com/Daiyuhan223)
 
 基于 Nginx + Python 的 CDN（内容分发网络）。Manager 集中管控，边缘节点自动同步配置和 SSL 证书，支持通配符域名、HTTPS 回源、WebSocket、HTTP→HTTPS 跳转、301 重定向、证书库、GeoDNS 调度、Baota 面板节点。
 
 - 项目主页：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 作者：Daiyuhan（https://github.com/Daiyuhan223）
-- 当前版本：v0.1.1
+- 当前版本：v0.1.2
 
 ---
 
@@ -539,18 +539,17 @@ Nginx 缓存参数：`keys_zone=10m`、`max_size=1g`、`inactive=7d`。
 curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash
 
 # 升级到指定 tag / 分支
-curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.1.1
+curl -fsSL https://raw.githubusercontent.com/Daiyuhan223/Daiyuhan-CDN/main/upgrade.sh | bash -s -- v0.1.2
 ```
 
 **本地升级**——已有新版代码在服务器上时：
 
 ```bash
-cd /tmp
-unzip -qo dyh-cdn.zip -d /opt/cdn-update     # 或 git clone 到服务器
-cd /opt/cdn-update
-chmod +x update.sh
+cd /opt/cdn-update      # 放有新版代码的目录（含 update.sh）
 bash update.sh
 ```
+
+> `update.sh` 是升级引擎，`upgrade.sh` 与面板「立即更新」在下载到新代码后都会调用它；一般无需手动执行。
 
 升级流程会：备份当前代码（可回滚）→ 停服同步代码（排除 `data/`）→ Python 语法自检（失败自动还原）→ 重启服务 → 健康检查 → 清空节点 hash 触发全量重同步。边缘节点 agent 会在一小时内通过 `/api/v1/agent/download` 自更新。
 
@@ -560,7 +559,7 @@ bash update.sh
 
 ## 开源信息
 
-- 项目：**Daiyuhan-CDN** v0.1.1
+- 项目：**Daiyuhan-CDN** v0.1.2
 - 作者：**Daiyuhan** — https://github.com/Daiyuhan223
 - 仓库：https://github.com/Daiyuhan223/Daiyuhan-CDN
 - 版本规则：`0.1.x` 为增量更新（功能/修复），较大功能升级走 `0.2.0`（详见 [CHANGELOG.md](CHANGELOG.md)）

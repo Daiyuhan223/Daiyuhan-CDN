@@ -1,5 +1,7 @@
 #!/bin/bash
-# CDN Manager 无损升级脚本
+# CDN Manager 无损升级引擎
+# 注意：这是升级引擎，通常由 upgrade.sh / 面板「立即更新」在下载到新代码后调用，
+#       一般无需手动执行。
 # 用法（在服务器上拿到新版代码后）：
 #   cd /opt/cdn-update && bash update.sh
 # 或指定安装目录： CDN_INSTALL_DIR=/opt/cdn-manager bash update.sh
