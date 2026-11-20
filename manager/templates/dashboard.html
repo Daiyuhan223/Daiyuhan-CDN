@@ -12,6 +12,7 @@ body{background:#f5f6fa}.navbar-brand{font-weight:700;letter-spacing:1px}.card{b
 .upd-modal{border-radius:16px;overflow:hidden}.upd-vers{display:flex;align-items:center;justify-content:center;gap:18px;padding:14px;background:#f8f9fa;border-radius:12px}.upd-ver-box{text-align:center;min-width:110px;padding:8px 14px;border-radius:10px;background:#fff;border:1px solid #e9ecef}.upd-ver-label{font-size:12px;color:#adb5bd}.upd-ver-num{font-size:20px;font-weight:700;color:#495057}.upd-ver-new{background:#fff8e1;border-color:#ffe08a}.upd-ver-new .upd-ver-num{color:#b8860b}.upd-notes{background:#fffdf5;border:1px solid #ffe8a3;border-radius:12px;padding:12px 16px;font-size:13px;line-height:1.7;max-height:300px;overflow:auto}.upd-notes ul{margin:0;padding-left:18px}.upd-notes li{margin:2px 0}.card{transition:box-shadow .25s ease,transform .25s ease}.card:hover{box-shadow:0 10px 26px rgba(0,0,0,.10);transform:translateY(-2px)}.modal-content{animation:modalPop .22s cubic-bezier(.2,.8,.2,1)}@keyframes modalPop{from{transform:scale(.96);opacity:.5}to{transform:scale(1);opacity:1}}.traffic-sum{font-size:13px;color:#6b7280;margin-bottom:14px}.traffic-sum span{font-weight:700;color:#212529;font-size:15px}.traffic-list{display:flex;flex-direction:column;gap:12px}.traffic-row{display:flex;align-items:center;gap:14px;opacity:0;transform:translateY(8px);animation:trafficIn .45s ease forwards}@keyframes trafficIn{to{opacity:1;transform:none}}.traffic-rank{width:22px;text-align:center;font-weight:700;color:#adb5bd}.traffic-name{width:220px;font-size:13px;font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.traffic-bar-wrap{flex:1;background:#f1f3f5;border-radius:999px;height:14px;overflow:hidden}.traffic-bar{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#4dabf7,#4361ee);transition:width .8s cubic-bezier(.2,.8,.2,1)}.traffic-row:nth-child(1) .traffic-bar{background:linear-gradient(90deg,#ffd43b,#ff922b)}.traffic-row:nth-child(2) .traffic-bar{background:linear-gradient(90deg,#ced4da,#adb5bd)}.traffic-row:nth-child(3) .traffic-bar{background:linear-gradient(90deg,#e599f7,#cc5de8)}.traffic-val{width:160px;text-align:right;font-size:13px;color:#374151;font-variant-numeric:tabular-nums}@media(max-width:768px){.traffic-name{width:120px}.traffic-val{width:110px}}
 </style>
 <style id="m3-theme">
+{% raw %}
 :root{--m3-primary:#5B4BDB;--m3-primary-2:#8B7BF0;--m3-tertiary:#FF6F91;--m3-surface:#FBF9FF;--m3-on:#1C1B22;--m3-muted:#6B6780;--m3-elev:0 10px 30px rgba(80,60,150,.10);--m3-spring:cubic-bezier(.34,1.56,.64,1)}
 body{font-family:'Manrope',system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--m3-surface);color:var(--m3-on);position:relative;overflow-x:hidden}
 body::before,body::after{content:"";position:fixed;z-index:-1;border-radius:50%;filter:blur(72px);opacity:.45;pointer-events:none}
@@ -85,7 +86,8 @@ body::after{width:460px;height:460px;right:-150px;bottom:-170px;background:radia
 .upd-vers{background:#f4f0fb;border-radius:18px}
 .upd-ver-box{border-radius:18px}
 .upd-notes{border-radius:18px;background:#faf7ff;border-color:#e7ddff}
-@media(max-width:768px){#tabs{display:flex;flex-wrap:wrap}.navbar{border-radius:0 0 22px 22px}}
+@media(max-width:768px){ #tabs{display:flex;flex-wrap:wrap}.navbar{border-radius:0 0 22px 22px}}
+{% endraw %}
 </style>
 </head>
 <body>
